@@ -1,0 +1,578 @@
+;  filename  CG.MAC
+;  global definitions and memory allocation
+;------------------------------------------
+
+CG.PC=1		;  PC = 0  wirewrap, 1  PC board
+CG.ROM=1	;  0  dev sys,  1  ROMs
+
+CG.MUS=1	;  music on/off
+CG.ST=1 	;  self-test on/off
+
+;  general purpose definitions
+;      masks
+MD0	= 01
+MD1	= 02
+MD2	= 04
+MD3	= 08
+MD4	= 10
+MD5	= 20
+MD6	= 40
+MD7	= 80
+
+;  checksums
+CHK01	= 0E7
+CHK02	= 08E
+CHK03	= 01E
+CHK04	= 008
+CHK05	= 0EC
+
+;  button flags
+E.JUMP	= 01
+E.ST1	= MD3
+E.ST2	= MD4
+
+;-----------------------------
+;  memory map equates
+
+;  POKEY
+
+POKEY0	= 9800
+POKCT0	= 0F+POKEY0
+
+POKEY1	= 9A00
+POKCT1	= 0F+POKEY1
+ALLPOT	= 08+POKEY1
+POTGO	= 0B+POKEY1
+
+RANDOM	= 0A+POKEY0
+
+;  TOPOROIDS hardware addresses
+XB	= 0	;  bit mode X position 0-255
+YB	= 1	;  bit mode Y position 24-255
+VB	= 2	;  bit mode value (0F,1F,2F,...,FF)
+
+;   PC  memory equates
+
+HW.LE1	= 9F06		;  LED 1
+HW.BHR	= 9F06		;  bothram in upright
+
+HW.LE2	= 9E81		;  LED 2
+
+HW.VSC	= 9D00		; vert scroll
+HW.HSC	= 9C80		; hor  scroll
+
+HW.FLP	= 9F04		; flip
+HW.SIR	= 9F05		; EEROM write inhibit
+
+HW.WDC	= 9E00		; watchdog clear
+WCHDOG=HW.WDC
+
+HW.IAC	= 9D80		; interrupt acknowledge
+
+HW.TBV	= 9400		;  trackball vert
+HW.TBH	= 9401		;  trackball hor
+HW.T2V	= 9402		;  cocktail  vert
+HW.T2H	= 9403		;  cocktail  hor
+
+HW.VBL	= 9600
+MA.VBL	= MD5
+MA.BUT	= MD6		;  left
+MA.BU2	= MD7		;  right
+MA.ST1	= MD6		;  left
+MA.ST2	= MD7		;  right
+
+HW.ST1	= HW.VBL
+HW.ST2	= HW.VBL
+
+HW.STS	= 9600
+MA.STS	= MD4
+
+HW.BSL	= 9E87		; bank select 0,FF
+
+HW.AX	= 9F00		; autoinc x, 0 on, FF off
+HW.AY	= 9F01		;	  y, 0 on, FF off
+HW.XIN	= 9F02		; xinc	, 0 inc, FF dec
+HW.YIN	= 9F03		; yinc	, 0 inc, FF dec
+
+HW.TL	= 9E80		; trackball light, 0=off, FF=on
+
+;  Color RAM
+CL.RAM	= 9F80
+
+;  motion objects
+MT.BU0	= 8E00	; motion object buffer  0
+MT.BU1	= 8F00	;			1
+MT.BSL	= 9F07	;  buffer select flag
+
+
+; EEROM
+EE.ROM	= 9000
+EE.SIR	= 9F05		;  0 .. store inhibit, enable recall
+			;  0FF .. reverse
+EE.RE2	= 9E84		;  recall, version 2
+EE.REC	= 9C00		;  recall, write
+EE.SLO	= 9E82		;  store low
+EE.SHI	= 9E83		;  store high
+
+;------------------------------------------
+;  Zero page storage etc.
+
+	.= 04
+HW.VSV:	.BLKB 1		;  vert scroll flag
+HW.HSV:	.BLKB 1		;  hor scroll flag
+HW.FLV:	.BLKB 1		;  filp flag 0 .. no flip,  0FF .. flip
+HW.COK: .BLKB 1		;  cocktail flag, 0 .. no cocktail, 0FF .. cocktail
+IN.BSL:	.BLKB 1		;  interrupt bank select flag
+
+GM.STA:	.BLKB 1		;  game state
+
+WV.SIZ=400		;  size of storage for 1 playfield
+WV.STR=0A000		;  start of split storage
+
+WV.OFF:	.BLKB 2		;  wave offset
+WV.TIM:	.BLKB 2		;  wave timer
+WV.ATP:	.BLKB 1		;  attract mode pointer
+WV.CIN:	.BLKB 1		;  color transfer inhibit
+
+PL.FLG:	.BLKB 1		;  2-player flag: 0= 1 player game
+			;		  1= 2 players
+PL.UP:	.BLKB 1		;  which player up: 0=player 1
+			;		    1=player 2
+PL.SFL:	.BLKB 1		;  start flag for player 2
+
+; CL.TIN:.BLKB 2		;  color table index
+CL.PT1:	.BLKB 2		;  pointer 1
+CL.PT2:	.BLKB 2		;  pointer 2
+
+MT.CUR:	.BLKB 1		;  current motion object buffer 0,1
+MT.PRE:	.BLKB 1		;  previous mt ob buf
+MT.PTR:	.BLKB 2		;  motion object pointer
+
+SYNC:	.BLKB 1
+FRAME:	.BLKB 2		;  frame counter
+
+CURLIN:	.BLKB 1
+LINMOD:	.BLKB 1
+
+BL.HEI:	.BLKB 1
+BL.HST:	.BLKB 1
+BL.VST:	.BLKB 1
+BL.V1S:	.BLKB 1
+BL.V1N:	.BLKB 1
+BL.V2S:	.BLKB 1
+BL.V2N:	.BLKB 1
+BL.ULE:	.BLKB 1
+BL.URE:	.BLKB 1
+BL.UCR:	.BLKB 1
+BL.HRE:	.BLKB 1
+BL.HES:	.BLKB 1
+BL.HEL:	.BLKB 1
+BL.HLE:	.BLKB 1
+BL.HLL:	.BLKB 1
+
+LN.LG1:	.BLKB 1
+LN.LG2:	.BLKB 1
+LN.LG3:	.BLKB 1
+LN.HCR:	.BLKB 1
+LN.VCR:	.BLKB 1
+LN.CO1:	.BLKB 1
+LN.CO2:	.BLKB 1
+LN.CO3:	.BLKB 1
+
+FC.HST:	.BLKB 1
+FC.VST:	.BLKB 1
+FC.V1S:	.BLKB 1
+FC.V1N:	.BLKB 1
+FC.V2S:	.BLKB 1
+FC.V2N:	.BLKB 1
+FC.COH:	.BLKB 1
+
+FC.BV:
+FC.BV3:	.BLKB 1		;  bit-map value for face 3
+FC.BV2:	.BLKB 1		;	2
+FC.BV1:	.BLKB 1		;	1
+FC.BVB:	.BLKB 1		;	border
+FC.BVC:	.BLKB 1		;	gem
+FC.BVR: .BLKB 1		;	road
+FC.BVS:	.BLKB 1		;	score
+
+CT.HST = 05C
+CT.VST = 086
+
+CT.TUN:	.BLKB 1
+CT.CNT:	.BLKB 1
+
+CT.ADL:	.BLKB 2
+CT.ALL:	.BLKB 2
+CT.ARL:	.BLKB 2
+CT.ACL:	.BLKB 2
+CT.AFL:	.BLKB 2
+CT.A2L:	.BLKB 2
+CT.ADB:	.BLKB 2
+
+CT.ROM:	.BLKB 2
+CT.RAM:	.BLKB 2
+CT.BV3:	.BLKB 1		; face 3 color (accessible or not)
+
+CT.HR1:	.BLKB 1		;  height offset region 1
+CT.HR2:	.BLKB 1		;  height offset region 2
+CT.HR3:	.BLKB 1		;  height offset region 3
+CT.GMD:	.BLKB 1		;  gem regeneration mode
+
+CR.VST:	.BLKB 1
+CR.HST:	.BLKB 1
+CR.CNT:	.BLKB 1
+
+;  the following must be on zero page
+EZ.MAT:	.BLKB 2
+EZ.MA2:	.BLKB 2
+EZ.BOR:	.BLKB 2
+EZ.BO2:	.BLKB 2
+
+; end
+
+CE.TMP:	.BLKB 1
+CE.XD:	.BLKB 1
+CE.YD:	.BLKB 1
+CE.COC:	.BLKB 2			;  gem count
+
+TR.XD:	.BLKB 1			;  trackball deltas
+TR.YD:	.BLKB 1
+EN.JPX:	.BLKB 1			;  jumping deltas
+EN.JPY:	.BLKB 1
+TR.I:	.BLKB 1
+TR.J:	.BLKB 1
+
+EL.MOD:	.BLKB 1
+EL.SIT:	.BLKB 1
+EL.UPF:	.BLKB 1
+	EC.USZ = .-EL.MOD	; update buffer size
+EL.MAT:	.BLKB 2
+EL.TOP:	.BLKB 1
+EL.BOT:	.BLKB 1
+EL.HP:	.BLKB 1
+EL.VP:	.BLKB 1
+EL.WAI:	.BLKB 1
+EL.PRI:	.BLKB 1
+	EC.BSZ = .-EL.MOD	; buffer size per elevator
+
+EC.PTR:	.BLKB 2
+EW.PTR:	.BLKB 2
+EW.NPT:	.BLKB 2
+
+WR.TPT:	.BLKB 2			;  word table pointer
+WR.PTR:	.BLKB 2			;  word data pointer
+WR.LEN:	.BLKB 2			;  word length
+
+MS.PTR:	.BLKB 2			;  message pointer
+MS.LEN:	.BLKB 2			;  message length
+AL.PTR:	.BLKB 2
+
+AL.X:	.BLKB 1			;  letter x-position
+AL.Y:	.BLKB 1			;  y-position
+AL.COL:	.BLKB 1			;  color
+AL.DIG:	.BLKB 1
+AL.TMP:	.BLKB 1
+AL.LMG:	.BLKB 1			;  left margin
+
+
+;  coin section
+;  coin configuration flags
+OFFSET	=1		;VARS ARE OFFSET BY 1
+BONADD	=0		;BONUS ADDER ACTIVE
+COIN	=0		;COIN SWITCHES ARE ACTIVE LOW
+COIN67	=0		;COINS ARE NOT IN D5-D7
+COIN01	=1		;COINS ARE IN D0-D2
+EMCTRS	=3		;COIN COUNTERS
+SLAM 	=0		;SLAM LO TRUE
+CNTINT	=0		;$INTCT already exists
+INCLUDE	=1		;DONT GENERATE .END
+QUICK	=1		;  quick version, coutesy of Dr. B
+
+;  zero page allocation
+$$CRDT:	.BLKB 1		;TOTAL CREDITS
+$PSTSL:	.BLKB 3		;POST-COIN SLAM TIMERS
+$CNSTT:	.BLKB 3		;COIN DETECTION TIMERS
+$CNCT:	.BLKB 3		;COIN COUNTERS FOR PROGRAM
+$CMODE:	.BLKB 1		;COIN MODE
+$LMTIM:	.BLKB 1		;SLAM TIMER ENABLE
+
+$INTCT::	.BLKB 1
+
+$CCTIM:	.BLKB 3		;COIN COUNTER TIMERS
+$BCCNT:	.BLKB 1		;BONUS COIN COUNTER
+$BC:	.BLKB 1		;BONUS COINS ACCRUED
+$COINS:	.BLKB 1		;COIN SWITCH SHADOW
+
+;  more coin equates
+$LMBIT	=MD3		;BIT POSITION OF SLAM
+$CNCTR	=9E85		;COUNT COUNTER ADDRESSES
+$COINA	=$COINS		;COIN SWITCHES
+$LAM	=9600		;D3=PUSHED
+
+;  general purpose temporary variables
+
+TEMP1::	.BLKB 2
+TEMP2::	.BLKB 2
+TEMP3::	.BLKB 2
+TEMP4::	.BLKB 2
+TEMP5::	.BLKB 2
+
+TFLASH:	.BLKB 1		;  trackball flash mode   0 .. off
+			;  0FF on,  else flashing
+ST.CRF:	.BLKB 1		;  selftest coinroutine flag
+BR.STP:	.BLKB 1		;  bear stepping variable
+SN.GFL:	.BLKB 1		;  sound flag for background sound
+AT.OUT:	.BLKB 1		;  ?
+;  sound variables
+
+ATRACT::	.BLKB 1
+SN.NUM::	.BLKB 1	;  sound number
+AT.PRO:		.BLKB 1
+AT.PRT:		.BLKB 1
+
+;  more miscellaneous zero page
+SQ.LEF:	.BLKB 1		;  square left border
+SQ.RIG:	.BLKB 1		;  sqare right border
+SC.INC:	.BLKB 3		;  increment
+SC.NM:	.BLKB 3
+SC.DIG:	.BLKB 1
+SC.FNZ:	.BLKB 1
+SC.LEF:	.BLKB 1		;  number of pixels left to erase
+WV.WAR:	.BLKB 1		;  warp level
+
+EN.DSX:	.BLKB 1		;  screen destination of bear
+EN.DSY: .BLKB 1
+
+EN.EWM:	.BLKB 1		;  end of wave mode
+EN.WRF:	.BLKB 1		;  warp flag
+
+EN.XX:  .BLKB 1		;  temps for motion object transfer
+EN.YX:	.BLKB 1
+
+MN.DEL:	.BLKB 2		;  main loop delay
+
+ST.PLY:	.BLKB 1		;  game play flag (0FF=play, 0 atr)
+ST.VBC:	.BLKB 1		;  Vblank count
+
+WV.SCF:	.BLKB 1		;  scroll flag 0,1,2,3 (no,r,l,u)
+WV.MFL:	.BLKB 1		;  message flag, 0FF .. display mess
+WV.MNM:	.BLKB 1		;  message number
+
+AR.STA:	.BLKB 1		;  arrow state
+AR.MAX:	.BLKB 1		;  number of arrow states
+ST.COP:	.BLKB 1		;  self-test coin option
+
+
+;  score variables
+SC.COI:	.BLKB 1		;  coin display flag
+
+
+SC.SCI:	.BLKB 3		;  current initials
+SC.NWP:	.BLKB 1		;  new position in hs table
+SC.WLT:	.BLKB 1		;  which letter enter?
+SC.HSO:	.BLKB 2		;  track ball pos for hs
+SC.HSD:	.BLKB 3		;  remember initials for player 2
+			;  display on wave 1
+
+CL.OLH:	.BLKB 1		;  selftest color output values
+CL.OLV: .BLKB 1
+
+.GLOBL	RCN,RCS
+.GLOBL  RS.KEY,RS.K2,RS.K3,RS.K4
+
+; EEROM zero page variables
+.INCLUDE CEEDEF.MAC
+
+.IF GE,.-0F8
+.ERROR ;  RAM overlap with sounds
+.ENDC
+
+;-------------------
+;  other RAM storage
+
+.=202
+;  background display storage
+SQ.NUM=0F		;  sixteen background regions
+SQ.LS1: .BLKB SQ.NUM+1
+SQ.LS2: .BLKB SQ.NUM+1
+SQ.LS3: .BLKB SQ.NUM+1
+SQ.LS4: .BLKB SQ.NUM+1
+
+
+EN.MAX=0A
+;  sorting storage
+EN.SPT:	.BLKB 16		; pointers for sorter
+EN.SOR:	.BLKB EN.MAX*16		; histogram sorting storage
+
+
+MN.MOD:	.BLKB 1		;  main loop mode, allows combining
+			;  game states
+
+CL.SHR:	.BLKB 10*2*2	;  shadaw color RAM
+
+EEBUF:	.BLKB 100	;  buffer for EEROM test
+
+HFSIZ=250.
+SC.HS1:	.BLKB HFSIZ	;  high scores
+SC.HS2: .BLKB HFSIZ
+SC.HS3:	.BLKB HFSIZ
+SC.HI1:	.BLKB HFSIZ	;  and initials
+SC.HI2: .BLKB HFSIZ
+SC.HI3: .BLKB HFSIZ
+
+
+;  lower RAM ends at 0C00
+.IF GE,.-0C00
+.ERROR ;  out of lower RAM
+.ENDC
+
+; additional RAM
+	RAM.ST=8000
+	.= RAM.ST
+
+;  if this gets moved, change the FORTRAN program
+;  (  elevators !!)
+;  player 1 area
+
+PL.1A:
+
+;  city ram storage
+CTRAM	= .
+	.BLKB 16*16
+CTRA2	= .
+	.BLKB 16*16
+
+;  elevator storage
+	EC.MAX = 5		; maximum # of elevators
+EC.BLK:	.BLKB EC.BSZ*EC.MAX	; block size * # of blocks
+
+EC.NUM:	.BLKB 1
+EC.CUR:	.BLKB 1
+
+;  wave control storage
+WV.XCO:	.BLKB 1		;  wave x coordinate (0-255)
+WV.YCO:	.BLKB 1		;  wave y coordinate (0-255)
+WV.XCD:	.BLKB 1		;  destination wave x
+WV.YCD:	.BLKB 1		;  destination wave y
+
+WV.DF1:	.BLKB 1		;  short term difficulty 0-0F
+WV.DF2:	.BLKB 1		;  long term  difficulty 0-0F
+WV.DFO: .BLKB 1		;  difficultly offset, used by difficulty settings
+WV.NUM:	.BLKB 1		;  wave number
+
+
+WV.EOG:	.BLKB 1		;  end of game flag
+
+P1.LIV:
+WV.LIV:	.BLKB 1		;  lives left
+
+P1.SCO:
+SC.SCO:	.BLKB 3		;  score
+SC.NEL:	.BLKB 1		;  next extra life 
+
+;  entities storage
+;  for each variable a table of EN.MAX bytes is set aside
+;  alternating, and 2 bytes apart
+
+EN.STA:	.BLKB 1			;  state
+EN.LMD:	.BLKB 2*EN.MAX-1	;  life mode
+
+EN.IX:	.BLKB 1
+EN.IY:	.BLKB 2*EN.MAX-1
+EN.MX:	.BLKB 1
+EN.MY:	.BLKB 2*EN.MAX-1
+EN.HP:	.BLKB 1
+EN.VP:	.BLKB 2*EN.MAX-1
+EN.HTO:	.BLKB 1
+EN.HOF:	.BLKB 2*EN.MAX-1
+EN.HEI:: .BLKB 1
+EN.TFL:	.BLKB 2*EN.MAX-1
+EN.TFP:	.BLKB 1
+EN.WCF:	.BLKB 2*EN.MAX-1	;  wall collision flag
+EN.NSF:	.BLKB 1			;  new square flag
+EN.DR:	.BLKB 2*EN.MAX-1	;  direction 0<=EN.DR<=3
+EN.PRE:	.BLKB 1
+EN.DIR:	.BLKB 2*EN.MAX-1
+EN.ANV:	.BLKB 1			;  animation variable
+EN.GP1: .BLKB 2*EN.MAX-1	;  general purpose
+
+EN.GP2: .BLKB 1			;  more gen pur
+EN.GP3:	.BLKB 2*EN.MAX-1
+
+EN.X:	.BLKB 1
+EN.Y:	.BLKB 2*EN.MAX-1
+
+EN.BLK:	.BLKB 1			;  blanking flag
+EN.DEA:	.BLKB 2*EN.MAX-1	;  death flag
+
+EN.MPC=4		;  max number of pictures/en
+EN.PR1:	.BLKB 1
+EN.PC1:	.BLKB 2*EN.MAX-1
+EN.PR2:	.BLKB 1
+EN.PC2:	.BLKB 2*EN.MAX-1
+EN.PR3:	.BLKB 1
+EN.PC3:	.BLKB 2*EN.MAX-1
+EN.PR4:	.BLKB 1
+EN.PC4:	.BLKB 2*EN.MAX-1
+
+EN.XO1:	.BLKB 1
+EN.YO1:	.BLKB 2*EN.MAX-1
+EN.XO2:	.BLKB 1
+EN.YO2:	.BLKB 2*EN.MAX-1
+EN.XO3:	.BLKB 1
+EN.YO3:	.BLKB 2*EN.MAX-1
+EN.XO4:	.BLKB 1
+EN.YO4:	.BLKB 2*EN.MAX-1
+
+EN.LIV:	.BLKB 1
+EN.SP1:	.BLKB 2*EN.MAX-1	;  slow speed
+EN.SP2:	.BLKB 1			;  fast speed
+EN.AND:	.BLKB 2*EN.MAX-1	;  animation direction
+
+EN.DEL:	.BLKB 2*EN.MAX
+EN.MAT:	.BLKB 2*EN.MAX		;  
+EN.MA2:	.BLKB 2*EN.MAX		;  format 2 bytes adjacent
+
+;  single EN variables
+EN.COB:	.BLKB 1			;  collision bit
+EN.TMP:	.BLKB 1
+EN.NUM:	.BLKB 1
+EN.T1:	.BLKB 1
+EN.T2:	.BLKB 1
+EN.T3:	.BLKB 1
+EN.T4:	.BLKB 1
+EN.T5:	.BLKB 1
+EN.T6:	.BLKB 1
+EN.LDF:	.BLKB 1		;  last dot flag
+EN.XD:	.BLKB 1		;  delta x
+EN.YD:	.BLKB 1		;  delta y
+EN.OFF:	.BLKB 2		;  playfield offset
+EN.MSG:	.BLKB 1		;  max speed of gemeaters
+EN.CMS:	.BLKB 1		;  crystal monster speed
+EN.JFL:	.BLKB 1		;  jump flag
+EN.JDL:	.BLKB 1		;  jump delay
+EN.JBO:	.BLKB 1		;  old jump button value
+EN.JB2:	.BLKB 1		;  ditto for button 2
+EN.JBP:	.BLKB 1		;  positive jump but transition
+
+EN.PDL:	.BLKB 1		;  player delay
+EN.GDL:	.BLKB 1		;  general delay at start
+EN.CDL:	.BLKB 1		;  collision delay, when hat on
+
+ST.TIM:	.BLKB 2		;  game time
+SC.PRH:	.BLKB 6		;  previous initials for hs
+SC.GEM:	.BLKB 1		;  player gem counter
+
+; player 2 area
+PL.AZ=.-PL.1A		;  size, in bytes, of player area
+PL.2A:
+	.BLKB PL.AZ
+P2.LIV=P1.LIV+PL.AZ	;  number of lives of other player
+P2.SCO=P1.SCO+PL.AZ	;  score of other player
+
+;  upper working RAM ends at 8DFF
+.IF GE,.-8E00
+.ERROR ;  out of upper RAM
+.ENDC
+                  

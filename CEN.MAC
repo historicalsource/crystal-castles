@@ -1,0 +1,2567 @@
+;  filename  CEN.MAC
+
+;------------------------
+;  init for start of wave
+EN.INI:
+	TRAI 2*EN.MAX EN.NUM
+	LDX #0
+	STX EN.EWM	;  end of wave mode init
+	STX EN.WRF	;  warp flag
+	STX EN.TFL
+	STX SC.GEM	;  gem counter
+	
+	BEGIN
+	 JSR EN.IN3
+	INXS 2
+	CPX EN.NUM
+	PLEND
+
+	RTS
+
+;----------------------------------
+;  init positions on wave (re)start
+EN.INP:
+
+	LDA HW.TBH	;  init trackball
+	STA TR.I
+
+	LDA HW.TBV
+	STA TR.J
+
+	TRAI 040 EN.GDL
+	TRAI 2*EN.MAX EN.NUM
+
+	LDX #0
+	STX EN.CDL	;  init collision delay
+	BEGIN
+	 JSR EN.IN2
+	INXS 2
+	CPX EN.NUM
+	PLEND
+
+	RTS
+
+;-----------------
+;  death of player
+EN.DTH:
+	LDY #0
+	TRAI 2*EN.MAX EN.NUM
+
+	LDX #0
+	BEGIN
+	TXA
+	IFNE
+	TR16AM EN.MA2(X) EZ.MA2
+	JSR EN.CCB
+	ENDIF
+
+	INXS 2
+	CPX EN.NUM
+	PLEND
+
+	RTS
+
+;---------------------------------------------
+; update EN
+EN.UPD:
+
+	LDA FRAME
+	AND #7F
+	IFEQ
+	 LDA SN.GFL
+	 IFEQ
+	  LDA 1+WV.TIM
+	  CMP #0C
+	  IFCC
+	  STA RS.KEY+1
+	  LDA #15
+	  JSR MN.SN1
+	  ENDIF
+	 ENDIF
+	 TRAI 0 SN.GFL
+	ENDIF
+
+	JSR TR.UPD	; trackball update
+	JSR EN.EWC	; end of wave calculation
+
+	LDA GM.STA
+	CMP #5
+	IFEQ
+	 RTS
+	ENDIF
+
+	JSR EN.PLU	; player update
+
+	LDA EN.GDL
+	IFNE
+	 DEC EN.GDL
+	ENDIF
+
+	LDA EN.CDL	;  collision delay
+	IFNE
+	 DEC EN.CDL
+	ENDIF
+
+	LDX #0
+	BEGIN
+
+	 TXA
+	 IFNE
+	  LDA EN.LMD	;  if player alive
+	  IFEQ
+	   JSR EN.COL	; collision detect
+	  ENDIF
+	 ENDIF
+
+	 JSR EN.UP2	; update EN
+	 JSR EN.OUT
+
+	INXS 2
+	CPX EN.NUM
+	PLEND
+
+	RTS
+
+;---------------------------
+;  update player,  jump etc.
+EN.JTL:
+.BYTE 00,04,08,0B,0E,11,14,16,18,1A,1C,1D,1E,1F,1F,20
+.BYTE 20,20,1F,1F,1E,1D,1C,1A,18,16,14,11,0E,0B,08,04
+EN.PLU:
+	LDA EN.LMD	;  must be alive
+	IFNE
+	 RTS
+	ENDIF
+
+	JSR EN.BRD		;  read both buttons
+
+	LDA ATRACT
+	IFEQ
+	 TRAI 0 EN.JBP		;  usually not jumping
+	 LDA WV.TIM+1
+	 IFNE
+	 LDA WV.TIM
+	 IFEQ
+	  TRAI 1 EN.JBP
+	 ENDIF
+	 ENDIF
+	ENDIF
+
+	LDA EN.JFL	;  jump flag update
+	IFEQ
+	 LDA EN.JDL
+	 IFEQ
+	  LDA EN.JBP
+	  IFNE		;  button down
+	   LDA EN.TFL	; if not in tunnel
+	   IFEQ
+	    TRAI 0FF EN.JFL
+	    TRAI 20 EN.JDL	;  start jump
+	    LDA #9
+	    JSR MN.SN1		;  jump sound
+	   ENDIF
+	  ENDIF
+	 ELSE
+	  DEC EN.JDL
+	 ENDIF
+	ENDIF
+
+	LDA EN.JFL
+	IFNE
+	 DEC EN.JDL
+	 IFEQ			;  landing
+	  LDA #2
+	  STA EN.JDL
+	  LDA #0
+	  STA EN.JFL
+	  LDA EN.MX
+	  AND EN.MY
+	  CMP #14
+	  IFEQ
+	   INC AT.OUT
+	  ENDIF
+	 ENDIF
+	ENDIF
+
+	LDA EN.JFL
+	IFNE
+	 LDA EN.JDL
+	 TAY
+	 LDA EN.JTL(Y)
+	 STA EN.HOF
+	ELSE
+	 TRAI 0 EN.HOF
+	ENDIF
+
+	RTS
+
+
+;---------------------
+;  read both buttons
+EN.BRD:
+	LDA HW.VBL
+	AND #MA.BUT
+	TAY		;  0     0    1   1
+	EOR EN.JBO	;  0     1    0   1
+			;  0     1    1   0
+	AND EN.JBO	;  0     1    0   0
+	STA EN.JBP	;  positive transition
+	
+	STY EN.JBO
+
+	.IF NE,CG.PC
+	LDA HW.VBL
+	AND #MA.BU2
+	TAY		;  0     0    1   1
+	EOR EN.JB2	;  0     1    0   1
+			;  0     1    1   0
+	AND EN.JB2	;  0     1    0   0
+	ORA EN.JBP	;  positive transition
+	STA EN.JBP
+
+	STY EN.JB2
+	.ENDC
+	RTS
+
+
+;-------------------------------
+;  compute absolute value of (A)
+EN.ABS:
+	CMP #0
+	IFMI
+	 NEGA
+	ENDIF
+	RTS
+
+;------------------------------
+;  rotate trackball coordinates
+TR.UPD:
+	JSR TR.DEL
+
+; calculate CE deltas given TR deltas
+
+   ; truncate TR deltas, store in CE deltas
+	TRAI 9 TEMP1
+	LDA TR.XD
+	JSR GP.TRC
+	STA CE.XD
+	LDA TR.YD
+	JSR GP.TRC
+	NEGA		;  invert delta Y
+	STA CE.YD
+
+   ;  rotate
+	LDA CE.XD	; calculate new CE.YD
+	ASL
+	ADD CE.YD
+	STA CE.TMP	; store in temp
+
+	LDA CE.YD	; calculate new CE.XD
+	ASL
+	SUB CE.XD
+	STA CE.XD	; and store
+	TRAM CE.TMP CE.YD	; also store CE.YD
+
+
+;  truncate again
+	TRAI 0F TEMP1
+	LDA CE.XD
+	JSR GP.TRC
+	STA CE.XD
+	LDA CE.YD
+	JSR GP.TRC
+	STA CE.YD
+
+;    jumping
+	LDA EN.JFL
+	IFNE
+	 LDA EN.JDL
+	 CMP #1F
+	 IFEQ
+	  LDA EN.IX
+	  ASLS 3
+	  STA EN.JPX
+	  LDA EN.IY
+	  ASLS 3
+	  STA EN.JPY
+	 ENDIF
+	 LDA EN.JDL
+	 CMP #1E
+	 IFEQ
+	  LDA EN.IX
+	  ASLS 3
+	  SUB EN.JPX
+	  DIV2
+	  DIV2
+	  DIV2
+	  STA EN.JPX
+
+	  LDA EN.IY
+	  ASLS 3
+	  SUB EN.JPY
+	  DIV2
+	  DIV2
+	  DIV2
+	  STA EN.JPY
+	 ENDIF
+	 LDA EN.JDL
+	 CMP #1E
+	 IFCC
+	  TRAM EN.JPX CE.XD
+	  TRAM EN.JPY CE.YD
+	 ENDIF
+	ENDIF
+
+
+	RTS
+
+TR.DEL:
+	LDA HW.TBH
+	SUB TR.I
+	STA TR.XD
+
+	LDA HW.TBV
+	SUB TR.J
+	STA TR.YD
+
+	LDA HW.TBH
+	STA TR.I
+	LDA HW.TBV
+	STA TR.J
+	RTS
+
+;--------------------------
+;  truncation routine:  truncates to -TEMP1:TEMP1
+;    input  A
+;    output A
+;----------------------
+GP.TRC:
+	CMP TEMP1
+	BMI 10$
+	LDA TEMP1
+	RTS
+10$:	NEGA
+	CMP TEMP1
+	BMI 20$
+	LDA TEMP1
+20$:	NEGA
+	RTS
+
+
+;-------------------------
+;  end of wave calculation
+EN.EWC:	
+
+;  if everybody in limbo, and no gems, advance wave
+
+	LDX #2
+	BEGIN
+	 LDA EN.LMD(X)
+	 CMP #3
+	 BNE 20$
+	INXS 2
+	CPX EN.NUM
+	PLEND
+
+	LDA EN.WRF
+	IFEQ
+
+	LDA CE.COC
+	ORA CE.COC+1
+	IFEQ		;  all gems gone
+	 JSR EN.LDB	;  last dot bonus awarded
+	 JSR WV.UPD
+	 JSR GM.EW0	;  end of wave state
+	ENDIF
+
+	ELSE		;  end wave quickly when warping
+	JSR WV.MBF
+	JSR WV.UPD
+	JSR GM.EW0
+	ENDIF
+20$:
+
+	LDA EN.EWM
+	IFNE
+	 RTS
+	ENDIF
+
+;  all gems gone?
+	LDA CE.COC
+	ORA 1+CE.COC
+	IFEQ
+	 JSR EN.EW	;  end of wave
+	ENDIF
+
+
+;  warp
+	LDA EN.JBP
+	IFEQ
+	 RTS
+	ENDIF
+;  jump button depressed
+
+	LDA WV.XCO
+	IFNE
+	 JMP 55$
+	ENDIF
+
+;  ordinary warp
+	IFEQA WV.YCO 0
+	LDA EN.TFL
+	IFNE
+	LDA WV.WAR
+	IFNE
+10$:
+	 STA TEMP5+1
+
+	 LDA #0
+	 STA SC.SCO
+	 STA SC.SCO+1
+	 STA SC.SCO+2
+	 STA SC.INC
+	 STA SC.INC+1
+	 STA SC.INC+2
+	 LDA #99
+	 STA SC.GEM
+	 LDX TEMP5+1
+	 BEGIN
+	  SED
+	  LDA SC.INC+2
+	  ADD #7
+	  STA SC.INC+2
+	  CLD
+	  DEX
+	 EQEND
+
+	 LDY #4
+	 LDX TEMP5+1
+	 CPX #3
+	 IFCS
+	 LDY #5
+	 ENDIF
+	 JSR MN.STL
+	 STA TEMP1
+	 CPY TEMP1
+	 IFCC		;  give at least the starting lives
+	  LDY TEMP1
+	 ENDIF
+	 STY WV.LIV
+	 JSR SC.UPD
+
+	 TRAM TEMP5+1 WV.XCD	;  warp
+	 LDX #0
+	 STX WV.YCD
+	 DEX
+	 STX EN.WRF	;  end wave immediately
+	 JMP EN.EW
+;	 RTS
+	ENDIF
+	ENDIF
+	ENDIF
+
+;  secret warp #1
+	LDA WV.YCO
+	IFEQ
+	IFEQA EN.MX 1
+	IFEQA EN.MY 1
+	 LDA #2
+	 JMP 10$
+	ENDIF
+	ENDIF
+	ENDIF
+
+55$:
+
+;  secret warp #2
+	IFEQA WV.XCO 2
+	IFEQA WV.YCO 0
+	IFEQA EN.MX 3
+	IFEQA EN.MY 3
+	LDA EN.CDL
+	IFNE
+	 LDA #4
+	 JMP 10$
+	ENDIF
+	ENDIF
+	ENDIF
+	ENDIF
+	ENDIF
+
+;  secret warp #3
+	IFEQA WV.XCO 4
+	IFEQA WV.YCO 2
+	IFEQA EN.MX 1
+	IFEQA EN.MY 1
+	 LDA #6
+	 JMP 10$
+	ENDIF
+	ENDIF
+	ENDIF
+	ENDIF
+	RTS
+
+;----------------------
+;  last dot bonus award
+EN.LDB:
+	JSR WV.MBF	;  move bear out of the way
+	JSR AL.MDB	;  message display board
+
+	LDA EN.LDF
+	IFEQ
+	 LDA #0E
+	 JSR MN.SN1
+
+	 LDA #0
+	 STA SC.INC
+	 STA 2+SC.INC
+	 STA SC.NM
+	 STA 2+SC.NM
+
+	 TRAI 094 AL.X
+	 TRAI 088 AL.Y
+
+	 LDA WV.XCO
+	 ASLS 2
+	 ADD WV.YCO
+	 ADD #10.
+	 JSR AL.CNV
+	 STA 1+SC.NM
+	 STA 1+SC.INC
+	 JSR SC.NDS		;  display bonus awarded
+	 JSR SC.UPD
+
+	 LDA #20
+	ELSE
+	 LDA #0F
+	 JSR MN.SN1
+	 LDA #21
+	ENDIF
+	JSR MS.DRW
+
+	TRAI 90 MN.DEL
+	BEGIN
+	 JSR MN.FRA
+	 DEC MN.DEL
+	EQEND
+
+	RTS
+
+
+;----------------------------
+;  start end of wave sequence
+EN.EW:
+	LDX #2
+	BEGIN
+	  LDA EN.LMD(X)
+	  CMP #3
+	  IFNE
+	   TRAI 1 EN.LMD(X)	;  everybody is dying
+	  ENDIF
+	INXS 2
+	CPX EN.NUM
+	PLEND
+
+	TRAI 0FF EN.EWM	;  end of wave mode 1
+	RTS
+
+;-----------------------
+;  collision EN vs EN(0)
+
+EN.COL:
+	COLSIZ=080
+	LDA EN.LMD(X)	;  if not on maze, no collision
+	IFNE
+	 JMP 50$
+	ENDIF
+
+;  compare EN CE X
+	LDA EN.IX(X)
+	ASLS 3
+	STA EN.T1
+
+	LDA EN.IX
+	ASLS 3
+	SUB EN.T1
+	STA EN.T2
+	LDA EN.MX
+	SBC EN.MX(X)
+	STA EN.T3
+	AD16AI EN.T2 COLSIZ
+
+	LDA EN.T3	; high byte of difference must =0,1
+	CMP #1
+	IFCS
+	 JMP 50$
+	ENDIF
+;	LDA EN.T2
+;	CMP #2*COLSIZ
+;	IFCS
+;	 JMP 50$
+;	ENDIF		; 0<=EX-CX+COLSIZ<=2*COLSIZ
+
+	LDA EN.IY(X)
+	ASLS 3
+	STA EN.T4
+
+	LDA EN.IY
+	ASLS 3
+	SUB EN.T4
+	STA EN.T5
+	LDA EN.MY
+	SBC EN.MY(X)
+	STA EN.T6
+	AD16AI EN.T5 COLSIZ
+
+	LDA EN.T6	;  high byte of difference must =0
+	CMP #1
+	IFCS
+	 JMP 50$
+	ENDIF
+;	LDA TEMP2
+;	CMP #2*COLSIZ
+;	IFCS
+;	 JMP 50$
+;	ENDIF
+
+	LDA EN.JFL	;  if not jumping
+	IFEQ
+	 LDA EN.HEI(X)	;  height difference <=2 
+	 SUB EN.HEI
+	 BINT 2,40$
+	 JMP 50$
+	ENDIF
+40$:
+	LDA EN.STA(X)
+
+	CMP #7		;  honey
+	IFEQ
+	 LDA #14
+	 JSR MN.SN1
+
+	 TRAI 01 EN.ANV(X)
+	 LDA #10	;  1000 points
+41$:
+	 STA 1+SC.INC
+	 LDA #0
+	 STA SC.INC
+	 STA 2+SC.INC
+	 JSR SC.UPD
+	 TRAI 0D EN.STA(X)
+	 TRAI 080 EN.DEL(X)
+	 JMP 50$
+	ENDIF
+
+	CMP #6		;  witch
+	IFEQ
+	 LDA EN.CDL
+	 IFNE
+	  TRAI 02 EN.ANV(X)
+	  LDA #30	;  3000 points
+	  JMP 41$
+	 ENDIF
+	ENDIF
+
+	LDA EN.CDL
+	IFNE
+	 JMP 50$
+	ENDIF
+
+	LDA EN.STA(X)
+	CMP #0D		;  score display
+	IFEQ
+	 JMP 50$
+	ENDIF
+
+	CMP #0A		;  stationary hat
+	IFEQ
+	 TRAI 0FF EN.CDL	;  collision delay
+	 SEI
+	 TXA
+	 PHA
+	 JSR RCN
+	 PLA
+	 TAX
+	 CLI
+	 LDA #8
+	 JSR MN.SN1
+	 TRAI 0 EN.ANV(X)
+	 LDA #05
+	 JMP 41$
+	ENDIF
+
+;	LDA EN.STA(X)	;  if creature eating
+	CMP #3
+	IFEQ
+	 LDA EN.JFL
+	 IFEQ		;  and no jumping
+	  LDA #2
+	  JSR MN.SN1
+	  TRAI 0 EN.ANV(X)
+	  LDA #05
+	  JMP 41$	;  500 points
+	 ENDIF
+	ELSE
+	 LDA EN.JFL	; if jumping
+	 IFNE
+	  LDA EN.STA(X)
+	  IFEQ		; if  a tree
+	   TRAI 0 EN.ANV(X)	;  youth regained
+	   LDY WV.DF2
+	   TRAM DF.TRG(Y) EN.DEL(X)	; tree growing time
+	   TRAI 0 1+EN.DEL(X)
+	  ELSE		; if not
+	   CMP #1
+	   IFPL
+	   CMP #3
+	   IFMI
+	    TRAI 5 EN.STA(X)	;  stun it
+	    TR16AI 60 EN.DEL(X)
+	   ENDIF
+	   ENDIF
+	  ENDIF
+	 ELSE
+	  TRAI 1 EN.LMD	;  else player death
+	  TRAI 07F EN.DEL
+	  LDA #3
+	  JSR MN.SN1	;  pl death sound
+	 ENDIF
+	ENDIF
+50$:
+	RTS
+
+;---------------------------------------
+; routine to initialize EN,  on gp start
+EN.IN2:
+;  life mode
+	TXA
+	STA TEMP1	;  for comparison later
+	IFEQ
+	 STA EN.LMD	;  player is alive
+	ELSE
+	CPX #2
+	IFEQ
+	 TRAI 3 EN.LMD(X);  swarm comes in later
+	ELSE
+
+	LDY WV.NUM
+	LDA DF.CRN(Y)
+	ADD WV.DF2		;  increase number
+	CMP #8			;  of creatures
+	IFCS			;  max of 8
+	 LDA #8
+	ENDIF
+
+	ASL
+	ADD #2
+	CMP TEMP1
+	IFPL
+	 LDA EN.DEA(X)
+	 IFEQ		;  if not completely dead
+	  TRAI 2 EN.LMD(X)	;  start descent
+	  LDA EN.STA(X)
+	  SUB #7
+	  IFEQ
+	   STA EN.LMD(X)
+	  ENDIF
+	 ENDIF
+	ELSE
+	 TRAI 3 EN.LMD(X)
+	ENDIF
+
+	ENDIF
+	ENDIF
+
+EN.INR:			;  entry for init positions
+	JSR EN.PSI	;  position init
+10$:
+	TR16AI CTRAM EN.MAT(X)
+	JSR EN.MUL
+	AD16AM EN.MAT(X) EN.OFF	
+	
+	TR16AM EN.MAT(X) EN.MA2(X)
+	AD16AI EN.MA2(X) 16*16
+	TR16AM EN.MAT(X) EZ.MAT
+	TR16AM EN.MA2(X) EZ.MA2
+	LDY #0
+	TRAM @EZ.MAT(Y) EN.HEI(X)
+
+;  height at 1 1 must not be 0 !!!!!!!! otherwise
+;  an infinite loop happens here
+
+	LDA EN.HEI(X)
+	IFEQ
+	 TRAI 1 EN.MX(X)
+	 TRAI 1 EN.MY(X)
+	 JMP 10$
+	ENDIF
+
+; horizontal position
+	LDA EN.MX(X)
+	SUB #1
+	ASLS 2
+	STA EN.T1
+	LDA EN.MY(X)
+	SUB #1
+	ASLS 3
+	STA EN.T2
+	LDA #CT.HST-9	; picture offset
+	ADD EN.T2
+	SUB EN.T1
+	STA EN.HP(X)
+
+; vertical position
+	LDA EN.MY(X)
+	SUB #1
+	ASL
+	STA EN.T2
+	LDA #0-CT.VST-0B+06+0A	; picture offset
+	SUB EN.T2
+	SUB EN.T1
+	STA EN.VP(X)
+
+;  screen vert coordinate (used for scrolling down)
+	ADD EN.HEI(X)
+	STA EN.Y(X)
+	LDA EN.HP(X)
+	STA EN.X(X)
+
+; pictures
+	TRAI 2  EN.AND(X)
+
+	LDA #11
+	JSR EN.PCF	;  bear
+
+; priority
+	LDY #0
+	LDA @EZ.MA2(Y)
+	AND #40
+	IFNE
+	 TRAI 0 EN.PR1(X)
+	ELSE
+	 TRAI 0FF EN.PR1(X)
+	ENDIF
+
+; fine x,y
+	TRAI 10 EN.IX(X)
+	TRAI 0C EN.IY(X)
+
+;  set collision bit, if not dead
+	LDA EN.LMD(X)
+	CMP #3
+	IFNE
+
+	CPX #0
+	IFNE
+	 LDA @EZ.MA2(Y)
+	 ORA #08
+	 STA @EZ.MA2(Y)
+	ENDIF
+
+	ENDIF
+
+	RTS
+
+;--------------------------------------------
+;  initialize positions etc., after death etc.
+EN.PSI:
+	TXA
+	IFEQ		;  player
+	  STA  EN.JDL	; not jumping
+	  STA  EN.JFL	; anymore
+	  STA  EN.BLK
+	  TRAI 14 EN.MX
+	  TRAI 11 EN.MY
+	ELSE
+;  init positions of creatures
+	  LDA WV.NUM	; 0-15
+	  ASLS 3
+	  ADD WV.NUM
+	  STA TEMP1
+	  TXA
+	  LSR
+	  SUB #1
+	  ADD TEMP1
+	  TAY
+	  TRAM DF.INX(Y) EN.MX(X)
+	  TRAM DF.INY(Y) EN.MY(X)
+
+;  swarm on top of player after too much time
+	  LDA EN.STA(X)
+	  CMP #8
+	  IFEQ
+	   LDA WV.TIM+1
+	   STA RS.KEY+1		; key of swarm sound
+
+	   LDA WV.DF2
+	   LSR
+	   NEGA
+	   ADD #0B		;  44 seconds
+	   CMP 1+WV.TIM
+	   IFCC
+ 
+	   LDA EN.TFL
+	   IFEQ
+	    LDA WV.TIM+1
+	    ADC #3
+	    STA RS.KEY+1
+
+	    TRAM EN.MX EN.MX(X)
+	    LDA EN.MY
+	   ELSE
+	    LDA #014
+	    STA EN.MX(X)
+;	    LDY WV.NUM
+;	    TRAM DF.TEX(Y) EN.MX(X)
+;	    TRAM DF.TEY(Y) EN.MY(X)
+	   ENDIF
+	   STA EN.MY(X)
+
+	   ENDIF
+	  ENDIF
+
+	  TRAI 0 EN.DR(X)	; direction
+	  TRAI 0 EN.HOF(X)
+
+	  LDA EN.STA(X)
+	  CMP #7
+	  IFEQ
+	   LDA #0
+	  ELSE
+	   LDA #0FF
+	  ENDIF
+	  STA EN.BLK(X)
+
+	  TRAI 0 EN.ANV(X)	;  animation variable init
+	  STA EN.GP1(X)		;  general purpose init
+	  STA EN.GP2(X)
+
+	  LDA EN.STA(X)
+	  IFEQ
+	   STA 1+EN.DEL(X)
+	   LDY WV.DF2
+	   TRAM DF.TRG(Y) EN.DEL(X)	; tree growing time
+
+	  ELSE
+	  CMP #8		;  swarm
+	  IFEQ
+	   TR16AI 140 EN.DEL(X)
+	  ELSE
+	   TR16AI 20 EN.DEL(X)
+	  ENDIF
+	  ENDIF
+
+	  
+	  LDY WV.DF2
+	  LDA DF.SP1(Y)
+	  ADD WV.DFO
+	  STA EN.SP1(X)
+	  LDA DF.MSG(Y)
+	  ADD WV.DFO
+	  STA EN.MSG		;  max speed g-eat
+	  TRAM DF.CMS(Y) EN.CMS		;  crys mons speed
+
+	ENDIF
+
+	RTS
+
+;------------------------------
+;  init state, at start of wave
+EN.IN3:
+;  state, picture offsets,  life or death
+
+	TRAI 0 EN.DEA(X)	;  everybody is alive
+	STA AT.OUT
+
+	TXA
+	IFEQ
+	 STA EN.STA
+	 TRAI 0F-3  EN.YO1
+	 STA	    EN.YO2
+	 TRAI 0FF-3 EN.YO3
+	 STA	    EN.YO4
+
+	 TRAI 0FC   EN.XO1
+	 STA	    EN.XO3
+	 TRAI 4	    EN.XO2
+	 STA	    EN.XO4
+	ELSE
+
+	 TRAI 0F    EN.YO1(X)
+	 STA	    EN.YO2(X)
+	 TRAI 0FF   EN.YO3(X)
+	 STA	    EN.YO4(X)
+
+	 TRAI 0FF EN.XO1(X)
+	 STA	 EN.XO3(X)
+	 TRAI 7   EN.XO2(X)
+	 STA	 EN.XO4(X)
+
+	 CPX #2	; slot for swarm
+	 IFEQ
+	  TRAI 8 EN.STA(X)
+	 ELSE
+	  TXA
+	  LSR
+	  SUB #2
+	  STA TEMP1      ; table entry
+
+	  LDA WV.NUM
+;  now have distribution number (0-0F)
+	  ASLS 3
+	  ADD TEMP1
+	  TAY
+
+	  LDA DF.CRT(Y)
+	  STA EN.STA(X)
+
+	 ENDIF
+	ENDIF
+	RTS
+;----------------------------------------------
+; calculate address offset by multiplying by 22
+EN.MUL:	
+	LDA EN.MX(X)
+	ASL
+	STA TEMP1
+	ASL
+	STA TEMP2
+	ASL
+	ASL
+	STA EN.OFF
+	LDA #0
+	ROL
+	STA EN.OFF+1
+
+	AD16A8 EN.OFF TEMP1
+	AD16A8 EN.OFF TEMP2
+	AD16A8 EN.OFF EN.MY(X)
+
+	RTS
+
+;----------------------
+;  update EN
+EN.UP2:
+	TR16AM EN.MAT(X) EZ.MAT
+	TR16AM EN.MA2(X) EZ.MA2
+;  if not in tunnel, update height
+	LDY #0
+	LDA @EZ.MA2(Y)
+	AND #20
+	IFEQ
+	 TRAM @EZ.MAT(Y) EN.HEI(X)
+	ENDIF
+
+	JSR EN.MOV
+
+	TR16AM EZ.MAT EN.MAT(X)
+	TR16AM EZ.MA2 EN.MA2(X)
+	RTS
+
+AT.XD:	.BYTE 0FD,0,0FB,4,5,0,2,3
+	.BYTE 0,0FF,0FD,0,2,3,4,5
+AT.YD:	.BYTE 0FD,0,0,0,0,0,0,2
+	.BYTE 3,4,0,2,5,0F9,2,0
+
+;---------
+;  move EN
+EN.MOV:
+	TXA
+	IFEQ
+
+;  detect gems only if player not jumping
+	LDA EN.JFL
+	BNE 10$
+	ENDIF
+	JSR EN.CDT
+10$:
+
+	JSR EN.STC	;  state calculation
+	JSR EN.LMC	;  life mode calculation
+
+
+	LDA EN.LMD
+	IFEQ		;  if player alive
+	 TXA
+	 IFEQ
+	  LDA ATRACT
+	  IFNE
+	   TRAM CE.XD EN.XD	; trackball inputs
+	   TRAM CE.YD EN.YD
+	  ELSE
+	   LDA WV.TIM
+	   AND #3F		;  once per second
+	   IFEQ
+	    INC WV.ATP	;  increment atract mode pointer
+	   ENDIF
+	   LDA WV.ATP
+	   CMP #0F
+	   IFCS
+	    TRAI 0F WV.ATP
+	   ENDIF
+	   TAY
+	   TRAM AT.XD(Y) EN.XD
+	   TRAM AT.YD(Y) EN.YD
+	  ENDIF
+	 ENDIF
+	ELSE		;  if player dead, everything stops
+	 TRAI 0 EN.XD
+	 TRAI 0 EN.YD
+	ENDIF
+
+	LDA EN.GDL
+	IFNE
+	  TXA
+	  IFNE
+	  TRAI 0 EN.XD		;  creature freeze
+	  STA EN.YD
+.REPT 0
+	  ELSE
+	  LDA EN.GDL		;  flash
+	  CMP #020
+	  IFCS		
+	  AND #08
+	  IFEQ
+	    TRAI 0 CL.SHR+17	;  white
+	    STA CL.SHR+1F
+	    STA CL.SHR+37
+	    STA CL.SHR+3F
+	  ELSE
+	    TRAM RANDOM CL.SHR+17   ;  random
+	    STA CL.SHR+1F
+	    AND #20
+	    STA CL.SHR+37
+	    STA CL.SHR+3F
+	  ENDIF
+	  ENDIF
+.ENDM
+	  ENDIF
+	ENDIF
+
+50$:
+	CPX #0
+	IFEQ
+	 JSR EN.PUP	;  player animation
+	ENDIF
+
+;  collision with playfield
+	TRAI 0 EN.WCF(X)	; no wall collision
+	STA    EN.NSF(X)	; no new square
+
+	LDA EN.IX(X)
+	ADD EN.XD
+	STA EN.IX(X)
+	LDY EN.XD
+	IFPL
+	 JSR EN.CXI
+	ELSE
+	 JSR EN.CXD
+	ENDIF
+
+	LDA EN.IY(X)
+	ADD EN.YD
+	STA EN.IY(X)
+	LDY EN.YD
+	IFPL
+	 JSR EN.CYI
+	ELSE
+	 JSR EN.CYD
+	ENDIF
+
+60$:
+	RTS
+
+;---------------------
+;  plunger pictures
+EN.PLP:
+	LDA FRAME
+	AND #^B00110000
+	LSRS 4
+	TAY
+	LDA 50$(Y)
+	JSR EN.PCF
+	RTS
+
+50$:	.BYTE 080,084,088,084
+
+;----------------------------
+;  table for eating animation
+EN.EAT:
+
+.BYTE 090,094,098,09C,0A0,0A4,0A8,0A8
+.BYTE 0A8,0A8,0A8,0A8,0A8,0A8,0A8,0A8
+;  used to have 0AC at end here
+
+;-------------------------------------------
+;  calculate EN movement,  state calculation
+EN.STC:
+	TXA	;  do nothing for player
+	IFEQ
+	 RTS
+	ENDIF
+
+	TRAI 0 EN.XD
+	STA EN.YD
+
+	LDA EN.STA(X)
+	CMP #10
+	IFCS
+	 LDA #10
+	ENDIF
+	ASL
+	TAY
+	JMPIN 1$
+
+	;  state 0 :  trees state
+10$:
+	DEC16A EN.DEL(X)	;  change state after timer
+	LDA EN.DEL(X)
+	IFEQ
+	LDA 1+EN.DEL(X)
+	IFEQ
+	 LDA EN.ANV(X)
+	 CMP #03
+	 IFMI
+	  LDY WV.DF2
+	  TRAM DF.TRG(Y) EN.DEL(X)
+	  TRAI 0 1+EN.DEL(X)
+	  INC EN.ANV(X)
+	 ENDIF
+	ENDIF
+	ENDIF
+
+	LDA EN.ANV(X)
+	CMP #03
+	IFMI
+	 TRAI 0 EN.SP1(X)
+	ELSE
+	 LDY WV.DF2
+	 LDA DF.TRS(Y)
+	 ADD WV.DFO
+	 STA EN.SP1(X)
+
+	 LDA FRAME
+	 AND #0F
+	 IFEQ
+	  LDA EN.ANV(X)
+	  CMP #03
+	  IFEQ
+	   LDA #04
+	  ELSE
+	   LDA #03
+	  ENDIF
+	  STA EN.ANV(X)
+	 ENDIF
+	ENDIF
+
+	JSR EN.VAN
+
+45$:			;  killer algorithm
+	LDA EN.IX(X)
+	LSRS 2
+	STA TEMP1
+	LDA EN.MX(X)
+	ASLS 3
+	ORA TEMP1
+	STA TEMP2
+
+	LDA EN.IX
+	LSRS 2
+	STA TEMP1
+	LDA EN.MX
+	ASLS 3
+	ORA TEMP1
+	SUB TEMP2
+
+	IFCS
+	 CMP EN.SP1(X)
+	 IFCS
+	  LDA EN.SP1(X)
+	 ENDIF
+	ELSE
+	 NEGA
+	 CMP EN.SP1(X)
+	 IFCS
+	  LDA EN.SP1(X)
+	 ENDIF
+	 NEGA
+	ENDIF
+
+	STA EN.XD
+
+
+	LDA EN.IY(X)
+	LSRS 2
+	STA TEMP1
+	LDA EN.MY(X)
+	ASLS 3
+	ORA TEMP1
+	STA TEMP2
+
+	LDA EN.IY
+	LSRS 2
+	STA TEMP1
+	LDA EN.MY
+	ASLS 3
+	ORA TEMP1
+	SUB TEMP2
+
+	IFCS
+	 CMP EN.SP1(X)
+	 IFCS
+	  LDA EN.SP1(X)
+	 ENDIF
+	ELSE
+	 NEGA
+	 CMP EN.SP1(X)
+	 IFCS
+	  LDA EN.SP1(X)
+	 ENDIF
+	 NEGA
+	ENDIF
+
+	STA EN.YD
+
+	JMP 50$
+
+;  state 1: plunger moving towards wall
+
+11$:
+	 DEC16A EN.DEL(X)
+	 LDA EN.DEL(X)
+	 IFEQ
+	 LDA 1+EN.DEL(X)
+	 IFEQ
+	  LDA EN.SP1(X)
+	  CMP EN.MSG
+	  IFMI
+	  INC EN.SP1(X)
+	  ENDIF
+
+	  TR16AI 100 EN.DEL(X)
+	 ENDIF
+	 ENDIF
+ 
+	 LDA EN.WCF(X)
+	 IFNE		;  if wall was hit
+	  TRAI 0FF TEMP1 ;  turn right
+	  LDA EN.DR(X)
+	  ADD TEMP1
+	  AND #03
+	  STA EN.DR(X)
+	  TRAI 2 EN.STA(X)	; and follow wall
+	  TRAI 3 EN.ANV(X)	; reset turn-counter
+	 ENDIF
+	 JSR EN.DRC	;  direction calc
+	 JSR EN.PLP
+	 JMP 50$
+
+;  state 2:  plunger follows wall
+12$:
+	 DEC16A EN.DEL(X)
+	 LDA EN.DEL(X)
+	 IFEQ
+	 LDA 1+EN.DEL(X)
+	 IFEQ
+	  LDA EN.SP1(X)
+	  CMP EN.MSG
+	  IFMI
+	  INC EN.SP1(X)
+	  ENDIF
+
+	  TR16AI 50 EN.DEL(X)
+	  LDA RANDOM
+	  AND #03
+	  STA EN.DR(X)
+	 ENDIF
+	 ENDIF
+
+	LDA EN.NSF(X)
+	IFNE
+	 TRAI 1 TEMP1
+	 LDA EN.DR(X)	;  turn left at new square
+	 ADD TEMP1
+	 AND #03
+	 STA EN.DR(X)
+	 DEC EN.ANV(X)
+	 IFEQ
+	  TRAI 1 EN.STA(X)
+	 ENDIF
+
+	 ELSE
+
+	LDA EN.WCF(X)
+	IFNE
+	 TRAI 0FF TEMP1
+	 LDA EN.DR(X)	;  turn right at wall
+	 ADD TEMP1
+	 AND #03
+	 STA EN.DR(X)
+	 TRAI 3 EN.ANV(X)
+	ENDIF
+	ENDIF
+
+	JSR EN.DRC
+	JSR EN.PLP
+
+	JMP 50$	
+
+;  state 3: plunger eating
+13$:
+	TRAI 0 EN.XD
+	STA EN.YD
+	DEC EN.DEL(X)
+	LDA EN.DEL(X)
+	IFEQ
+	  TRAI 1 EN.STA(X)
+	  TR16AI 60 EN.DEL(X)
+	  TRAI 3 EN.SP1(X)
+	ENDIF
+
+	TRAI 10 EN.IX(X)
+	STA EN.IY(X)
+
+	LDY WV.DF2
+	LDA DF.ETD(Y)
+	LSRS 5		;  2, 1, or 0
+	STA TEMP1
+
+	LDA DF.ETD(Y)
+	SUB EN.DEL(X)
+	ASL
+	BEGIN
+	 LSR		;  3, 2, or 1 LSR's 
+	 DEC TEMP1
+	MIEND
+
+	AND #0F
+	TAY
+	LDA EN.EAT(Y)
+	JSR EN.PCF
+	JMP 50$
+
+;   not used
+14$:
+	RTS
+	 
+
+;  plunger stunned state
+15$:
+	 DEC16A EN.DEL(X)
+	 LDA EN.DEL(X)
+	 IFEQ
+	 LDA 1+EN.DEL(X)
+	 IFEQ
+	  TRAI 1 EN.STA(X)
+	  TRAI 1 EN.SP1(X)
+	  TR16AI 50 EN.DEL(X)
+	  LDA RANDOM
+	  AND #03
+	  STA EN.DR(X)
+	 ENDIF
+	 ENDIF
+
+	LDA #80
+	JSR EN.PCF
+
+	RTS
+
+32$:	.BYTE 0,1,2,3, 0,1,2,3
+;  witch state
+16$:
+	LDA FRAME
+	AND #1F
+	IFEQ
+	LDA RANDOM
+	AND #07
+	STA RS.KEY
+	LDA #16
+	JSR MN.SN1
+
+	LDA EN.GP1(X)
+	ADD #1
+	AND #07
+	STA EN.GP1(X)
+	ENDIF
+	LDY EN.GP1(X)
+	LDA 32$(Y)
+	STA EN.DR(X)
+
+;  animation
+	JSR EN.DRC
+	LDA EN.DR(X)
+	ADD #5
+	STA EN.ANV(X)
+	JSR EN.VAN
+
+	JMP 50$
+
+
+;  honey
+17$:
+	LDA FRAME
+	AND #030
+	LSRS 2		;  0,4,8, or 0C
+	STA TEMP1
+	LDA #176.
+	ADD TEMP1
+	JSR EN.PCF
+
+	RTS
+
+; swarm
+18$:
+	DEC16A EN.DEL(X)
+	LDA EN.DEL(X)
+	IFEQ
+	LDA 1+EN.DEL(X)
+	IFEQ
+	 TRAI 1 EN.LMD(X)
+	 JSR EN.CCB
+	ENDIF
+	ENDIF
+
+	LDA FRAME
+	AND #0C
+;	LSR		; 0,4,8 OR C
+
+	ADD #128.+68.
+	JSR EN.PCF
+
+	LDY WV.DF2
+	LDA 1+WV.TIM
+	LSR
+	ADD DF.SWS(Y)
+	CMP #10
+	IFCS
+	LDA #10
+	ENDIF
+	STA EN.SP1(X)
+
+	JMP 45$
+
+37$:	.BYTE 228.,230.,232.,234.,234.,234.,236.,238.
+;  crystal ball, state 9
+19$:
+	LDA #0
+	JSR EN.PCF
+	LDA FRAME
+	AND #70
+	LSRS 4
+	TAY
+	LDA 37$(Y)
+	STA EN.PC3(X)
+	ADD #1
+	STA EN.PC4(X)
+
+	LDA FRAME
+	AND #03
+	IFEQ
+	 TRAM EN.CMS TEMP1
+
+	 LDA EN.MX
+	 SUB EN.MX(X)
+	 IFMI
+	  LDA EN.GP1(X)
+	  SUB #1
+	 ELSE
+	  CMP #1
+	  IFPL
+	   LDA EN.GP1(X)
+	   ADD #1
+	  ELSE
+	   LDA EN.GP1(X)
+	  ENDIF
+	 ENDIF
+	 JSR GP.TRC
+	 STA EN.GP1(X)
+
+;  y coordinate
+
+	 LDA EN.MY
+	 SUB EN.MY(X)
+	 IFMI
+	  LDA EN.GP2(X)
+	  SUB #1
+	 ELSE
+	  CMP #1
+	  IFPL
+	   LDA EN.GP2(X)
+	   ADD #1
+	  ELSE
+	   LDA EN.GP2(X)
+	  ENDIF
+	 ENDIF
+	 JSR GP.TRC
+	 STA EN.GP2(X)
+	ENDIF
+
+	TRAM EN.GP1(X) EN.XD
+	TRAM EN.GP2(X) EN.YD
+	RTS
+
+;  state 0A: stationary hat
+20$:
+	LDA #0
+	JSR EN.PCF
+	LDA FRAME
+	AND #030
+	LSRS 3		;  0,2,4 OR 6
+	STA TEMP1
+	LDA #109.
+	ADD TEMP1
+	STA EN.PC3(X)
+	ADC #1
+	STA EN.PC4(X)
+	RTS
+
+21$:
+	;  state 0B: cauldron
+	LDA FRAME
+	AND #08
+	LSRS 2		;  0 or 2
+	STA TEMP1
+	LDA #128.+12.
+	ADD TEMP1
+	STA EN.PC3(X)
+	ADC #1
+	STA EN.PC4(X)
+	LDA #121.
+	STA EN.PC1(X)
+	ADC #1
+	STA EN.PC2(X)
+
+	RTS
+
+;  state 0C: skeleton
+22$:
+	TRAI 02 EN.SP1(X)
+
+
+	LDA FRAME
+	AND #0F
+	IFEQ
+	LDA RANDOM
+	AND #3
+	IFEQ
+	 ADD #2
+	ENDIF
+	SUB #2
+	ADD EN.DR(X)
+	AND #3
+	STA EN.DR(X)
+	ENDIF
+
+	JSR EN.DRC
+;  animation
+	LDA FRAME
+	AND #030
+	LSRS 2		; 0 4 8 OR 0C
+	STA TEMP1
+	LDA #128.+84.
+	ADD TEMP1
+	JSR EN.PCF
+
+	JMP 50$
+
+39$:	.BYTE 125.,128.+64.,123.	; 500,1000,3000
+;  D:  score display
+23$:
+	LDA #128.+64.
+	JSR EN.PCF
+	LDY EN.ANV(X)
+	LDA 39$(Y)
+	STA EN.PC1(X)
+	ADD #1
+	STA EN.PC2(X)
+
+	DEC EN.DEL(X)
+	IFEQ
+	 TRAI 3 EN.LMD(X)	;  it disappears
+	 STA EN.DEA(X)
+	 TR16AM EN.MA2(X) EZ.MA2
+	 JSR EN.CCB		;  clear col bit
+	ENDIF
+	RTS
+24$:
+
+;  state 0E: ghost
+	TRAI 05 EN.SP1(X)
+	LDA FRAME
+	AND #03
+	IFEQ
+;	LDA EN.GP1(X)
+;	ADD #1
+	LDA RANDOM
+	AND #07
+	STA EN.GP1(X)
+	ENDIF
+	LDY EN.GP1(X)
+	LDA 32$(Y)
+	STA EN.DR(X)
+
+	JSR EN.DRC
+;  animation
+	LDA FRAME
+	AND #030
+	LSRS 2		; 0 4 8 OR 0C
+	STA TEMP1
+	LDA #128.+112.
+	ADD TEMP1
+	JSR EN.PCF
+
+	JMP 50$
+
+25$:
+
+;  dummy state
+26$:
+	RTS
+
+;  table of addresses for state handlers
+1$:	10$-1,11$-1,12$-1,13$-1,14$-1,15$-1
+	16$-1,17$-1,18$-1,19$-1
+	20$-1,21$-1,22$-1,23$-1,24$-1,25$-1,26$-1
+
+50$:
+	TRAI 0C TEMP1	;  truncate difs
+	LDA EN.XD
+	JSR GP.TRC
+	STA EN.XD
+
+	LDA EN.YD
+	JSR GP.TRC
+	STA EN.YD	
+
+	RTS
+
+;----------------------
+;  fill pictures with data
+EN.PCF:
+	STA EN.PC1(X)
+	BEQ 10$
+	ADD #1
+	STA EN.PC2(X)
+	ADC #1
+	STA EN.PC3(X)
+	ADC #1
+	STA EN.PC4(X)
+	RTS
+10$:
+	STA EN.PC2(X)
+	STA EN.PC3(X)
+	STA EN.PC4(X)
+	RTS
+
+;----------------------------------
+;  calculate difs given direction
+;  0 r 1 b 2 l 3 f
+EN.DRC:
+	LDA EN.DR(X)
+	IFEQ
+	 TRAI 0 EN.XD
+	 TRAM EN.SP1(X) EN.YD
+	 JMP 50$
+	ENDIF
+	
+	CMP #1
+	IFEQ
+	 LDA EN.SP1(X)
+	 NEGA
+	 STA EN.XD
+	 TRAI  0 EN.YD
+	 JMP 50$
+	ENDIF
+
+	CMP #2
+	IFEQ
+	 TRAI 0 EN.XD
+	 LDA EN.SP1(X)
+	 NEGA
+	 STA EN.YD
+	 JMP 50$
+	ENDIF
+
+	CMP #3
+	IFEQ
+	 TRAM EN.SP1(X) EN.XD
+	 TRAI 0 EN.YD
+	 JMP 50$
+	ENDIF
+
+50$:
+	RTS
+
+
+;-----------------------
+;  life mode calculation
+EN.LMC:
+	LDA EN.LMD(X)
+	IFEQ		;  if alive skip this
+	 RTS
+	ENDIF
+
+	TRAI 0 EN.XD
+	STA EN.YD
+
+	LDA EN.LMD(X)
+	CMP #1		;  if dying rise to top
+	IFNE
+	 JMP 40$
+	ENDIF
+
+	TXA
+	IFEQ		;  player rises to top, then dies
+	  LDA EN.DEL
+	  IFEQ
+	   LDA EN.Y
+	   ADD #8
+	   STA EN.Y
+	   CMP #0FF-18
+	   IFCS
+	    LDA #0
+	    JSR EN.PCF
+	    TRAI 3 EN.LMD
+	    JSR GM.DT0
+	   ENDIF
+	  ELSE
+	   DEC EN.DEL
+	  ENDIF
+
+	;  creature dying
+	ELSE
+	 JSR EN.CCB
+	 LDA EN.Y(X)
+	 CMP #0FF-24
+	 IFCS
+	  TRAI 3 EN.LMD(X)
+	 ELSE			;  rise to top
+	  ADD #4
+	  STA EN.Y(X)
+	 ENDIF
+
+	ENDIF
+	RTS
+  40$:		;  if being born, then come in from top
+
+	LDA EN.LMD(X)
+	CMP #2
+	IFEQ
+
+	LDA EN.VP(X)
+	ADD EN.HEI(X)
+	STA TEMP1
+
+	LDA EN.STA(X)
+	CMP #8
+	IFEQ
+	 LDA #8	 	;  delete this if really pressed
+	 LDY WV.DF2
+	 CPY #4
+	 IFCC
+	 LDA WV.TIM+1
+	 CMP #12
+	 IFCC
+	 LDA #2
+	 ENDIF
+	 ENDIF
+	ELSE
+	 LDA #4
+	ENDIF
+	STA TEMP2
+
+	LDA EN.Y(X)
+	SUB TEMP2
+	STA EN.Y(X)
+	CMP #-28
+	IFPL
+	 CMP #-28+8	;  between -4 and -1
+	 IFMI
+	 TRAI 0 EN.BLK(X)	;  no more blanking
+	 ENDIF
+	ENDIF
+
+	LDA EN.Y(X)
+	SUB #1
+	CMP TEMP1	;  if at destination
+	IFCC
+	 LDA EN.BLK(X)	;  and visible
+	 IFEQ
+	  TRAI 0 EN.LMD(X)
+	 ENDIF
+	ENDIF
+
+	RTS
+
+	ENDIF
+
+;   swarm in limbo  start afresh, after timer
+
+	LDA EN.STA(X)
+	CMP #8
+	IFEQ
+
+	LDA 1+WV.TIM
+	CMP #06
+	IFCC
+	 LDA WV.TIM	;   check only every 4 secs
+	 IFEQ
+	 LDA 4+EN.STA
+	 CMP #7		;   if honey there
+	 ENDIF
+	ELSE
+	 LDA #0		;   or too much time
+	ENDIF
+	IFEQ
+
+	LDA WV.TIM+1
+	CMP #1		;  after 4 secs, come out anyway
+	IFCS
+	LDA EN.EWM
+	IFEQ		;  not while eow in progress
+	 LDA EN.DEA(X)
+	 IFEQ
+	  TRAI 2 EN.LMD(X)	;  start to scroll down
+	  JSR EN.INR		;  re-init position
+	  LDA #4
+	  JSR MN.SN1		;  start bee warning sound
+	 ENDIF
+	 ENDIF
+	 ENDIF
+	ENDIF
+	ENDIF
+
+	RTS
+
+;---------------
+;  clear col bit
+EN.CCB:
+	LDY #0		; clear collision bit
+	LDA @EZ.MA2(Y)
+	AND #^B11110111
+	STA @EZ.MA2(Y)
+	RTS
+
+
+;---------------------------------- 
+;   calculate picture for animation
+
+;----------------------------------
+.RADIX 10
+EN.TBL:	.BYTE 1,5,25,29,17,21,9,13
+EN.DTL:	
+	.BYTE 105.,105.,85.,81.
+	.BYTE 101.,101.,85.,81.
+	.BYTE 97.,93.,93.,81.
+	.BYTE 89.,89.,85.,81.
+.RADIX 16
+
+
+EN.PUP:
+	LDA EN.LMD
+	CMP #1
+	IFEQ
+	 LDA EN.DEL
+	 IFNE
+	  LSRS 5	;  input 0-7F, output 0-3
+	  AND #03	;  just in case
+	  STA TEMP1
+	  LDA WV.LIV
+	  CMP #4
+	  IFCS
+	   LDA #4
+	  ENDIF
+	  SUB #1
+	  ASLS 2
+	  ADD TEMP1
+	  TAY
+	  LDA EN.DTL(Y)
+	 JSR EN.PCF
+	 ENDIF
+	 RTS
+	ENDIF
+
+;  get one of four directions
+	LDA EN.AND(X)
+	ASL
+	STA TEMP5
+
+;  get step,  left-right
+	LDA #0
+	LDY EN.JFL
+	IFEQ		;  only if not jumping
+	LDA EN.IX
+	ADD EN.IY
+	AND #10
+	LSRS 4
+	ENDIF
+	ADD TEMP5
+
+;  picture
+	TAY
+	LDA EN.TBL(Y)
+	ADD #2
+	STA EN.PC3(X)
+	ADC #1
+	STA EN.PC4(X)
+	LDY EN.CDL
+	IFEQ	
+	 SUB #3
+	ELSE
+	 LDA #109.
+	ENDIF
+	STA EN.PC1(X)
+	ADD #1
+	STA EN.PC2(X)
+	RTS
+
+;-----------------------
+;  animation data table
+EN.ANT:
+; 0-5 tree
+	.BYTE 21,25,29,2D,75
+
+; 6-9 witch
+	.BYTE 41,31,49,39
+
+
+;-------------------
+;  various animation
+EN.VAN:
+	LDY EN.ANV(X)
+	LDA EN.ANT(Y)
+	JSR EN.PCF
+	RTS
+
+;--------------------------
+;  check X border condition
+EN.CXI:
+	CMP #14
+	BMI 40$
+			; larger than #17
+	TR16AM EZ.MAT,EZ.BOR
+	AD16AI EZ.BOR,16
+	JSR EN.B2C
+
+	SUBIN EN.HEI(X),EZ.BOR
+	BINT 2,10$
+	LDY #0
+	LDA @EZ.BO2(Y)
+	AND #20
+	STA EN.TFP(X)
+	BNE 20$		; if tunnel, no collision
+5$:
+	TRAI 13 EN.IX(X)	;  collision
+	TRAI 1 EN.WCF(X)
+	JMP 40$
+10$:
+	TRAI 0,EN.TFP(X)
+
+20$:
+	LDA EN.COB
+	BNE 5$
+
+	JSR EN.XIN	; increment X, modify EN.IX etal
+40$:
+	RTS
+
+
+EN.CXD:
+	CMP #0C
+	BPL 40$
+
+	TR16AM EZ.MAT,EZ.BOR	; smaller than 16
+	SB16AI EZ.BOR,16
+	JSR EN.B2C
+
+	SUBIN EN.HEI(X),EZ.BOR
+	BINT 2,10$
+	LDY #0
+	LDA @EZ.BO2(Y)
+	AND #20
+	STA EN.TFP(X)
+	BNE 20$		; if tunnel, no collision
+5$:
+	TRAI 0C EN.IX(X)	; collision
+	TRAI 1 EN.WCF(X)
+	JMP 40$
+10$:
+	TRAI 0 EN.TFP(X)
+20$:
+	LDA EN.COB
+	BNE 5$
+	JSR EN.XDE	; decrement X, modify EN.IX etal
+40$:
+	RTS
+
+
+
+;----------------------------
+;  check Y border condition -
+;----------------------------
+EN.CYI:
+	CMP #14
+	BMI 40$
+			; larger than 31-8
+	TR16AM EZ.MAT,EZ.BOR
+	INC16  EZ.BOR
+	JSR EN.B2C
+
+	SUBIN EN.HEI(X),EZ.BOR
+	BINT 2,10$
+	LDY #0
+	LDA @EZ.BO2(Y)
+	AND #20
+	STA EN.TFP(X)
+	BNE 20$		; if tunnel, no collision
+5$:
+	TRAI 13 EN.IY(X)	; collision
+	TRAI 1 EN.WCF(X)
+	JMP 40$
+10$:
+	TRAI 0 EN.TFP(X)
+20$:
+	LDA EN.COB
+	BNE 5$
+	JSR EN.YIN
+40$:
+	RTS
+
+EN.CYD:
+	CMP #0C
+	BPL 40$
+
+	TR16AM EZ.MAT,EZ.BOR	; smaller than 12
+	DEC16A EZ.BOR
+	JSR EN.B2C
+
+	SUBIN EN.HEI(X),EZ.BOR
+	BINT 2,10$
+	LDY #0
+	LDA @EZ.BO2(Y)
+	AND #20
+	STA EN.TFP(X)
+	BNE 20$		; if tunnel, no collision
+
+5$:
+	TRAI 0C EN.IY(X)	; collision
+	TRAI 1 EN.WCF(X)
+	JMP 40$
+10$:
+	LDA EN.COB	;  collision with other entities
+	BNE 5$
+	TRAI 0 EN.TFP(X)
+20$:
+	JSR EN.YDE
+40$:
+	RTS
+
+
+;----------------------------
+; increment in  X-direction -
+;----------------------------
+EN.XIN:
+	LDA EN.IX(X)
+	SUB #20
+	BMI 40$
+
+	STA EN.IX(X)
+
+	LDA EN.HP(X)
+	SUB #04
+	STA EN.HP(X)
+
+	LDA EN.VP(X)
+	SUB #04
+	STA EN.VP(X)
+
+	INC EN.MX(X)
+	JSR EN.MUP		;  new square
+	TRAI 0 EN.AND(X)	;  animation direction
+40$:
+	RTS
+
+
+
+;--------------------------
+;  decrement in X direction
+EN.XDE:
+	LDA EN.IX(X)
+	BPL 40$
+	ADD #20
+	STA EN.IX(X)
+
+	LDA EN.HP(X)
+	ADD #04
+	STA EN.HP(X)
+
+	LDA EN.VP(X)
+	ADD #04
+	STA EN.VP(X)
+
+	DEC EN.MX(X)
+	JSR EN.MUP		;  new square
+	TRAI 2 EN.AND(X)	;  animation direction
+40$:
+	RTS
+
+
+;------------------------------
+;  increment in Y direction   -
+;------------------------------
+EN.YIN:
+	LDA EN.IY(X)
+	SUB #20
+	BMI 40$
+	STA EN.IY(X)
+
+	LDA EN.HP(X)
+	ADD #08
+	STA EN.HP(X)
+
+	DEC EN.VP(X)
+	DEC EN.VP(X)
+
+	INC EN.MY(X)
+	JSR EN.MUP		;  new square
+	TRAI 3 EN.AND(X)	;  animation direction
+40$:
+	RTS
+
+;------------------------------
+;  decrement in Y direction   -
+;------------------------------
+EN.YDE:
+	LDA EN.IY(X)
+	BPL 40$
+
+	ADD #20
+	STA EN.IY(X
+
+	LDA EN.HP(X
+	SUB #08
+	STA EN.HP(X)
+
+	INC EN.VP(X)
+	INC EN.VP(X)
+
+	DEC EN.MY(X)
+	JSR EN.MUP	;  new sqare update
+	TRAI 1 EN.AND(X)	;  animation direction
+40$:
+	RTS
+
+
+;-------------------------------
+;  routine to update ez.bo2
+;  and check for collision bit
+EN.B2C:
+	TR16AM EZ.BOR EZ.BO2
+	AD16AI EZ.BO2 16*16
+	LDY #0
+	LDA @EZ.BO2(Y)
+	AND #08
+	STA EN.COB
+	TXA
+	IFEQ
+	 STA EN.COB
+	ENDIF
+
+
+	RTS
+
+;--------------------------------------------------
+;  routine to update for new square
+EN.MUP:
+	LDY #0
+	TXA
+	IFNE
+		; clear collision bit
+	LDA @EZ.MA2(Y)
+	AND #^B11110111
+	STA @EZ.MA2(Y)
+	ENDIF
+
+	TR16AM EZ.BOR,EZ.MAT
+	TR16AM EZ.BO2,EZ.MA2
+
+	TXA
+	IFNE
+	LDA @EZ.MA2(Y)	;  set collision bit, except player
+	ORA #^B00001000
+	STA @EZ.MA2(Y)
+	ENDIF
+
+	LDA @EZ.MA2(Y)
+	AND #20
+	IFEQ
+	 STA EN.TFL(X)
+	ELSE		; if tunnel
+	 LDA EN.TFP(X)	  ; update tunnel flag
+	 IFNE
+	  TRAI 1 EN.TFL(X)
+	 ENDIF
+	 LDA EN.TFL(X)	  ; and mt priority
+	 IFNE
+	  TRAI 0FF EN.PR1(X) 
+	  JMP 50$
+	 ENDIF
+	ENDIF
+
+	LDA  @EZ.MA2(Y)
+	AND #40
+	IFNE
+	 TRAI 0 EN.PR1(X)
+	ELSE
+	 TRAI 0FF EN.PR1(X)
+	ENDIF
+
+50$:
+	TRAI 1 EN.NSF(X)	;  new square flag
+
+	RTS
+
+;----------------------------------------
+;  output EN
+;  convert to screen coordinates
+;  INPUT  EN.HP VP HEI HOF IX IY
+;  OUTPUT EN.X EN.Y
+EN.OUT:
+	LDA EN.BLK(X)
+	BNE 10$		;  blanking
+
+	LDA EN.LMD(X)
+	CMP #3		;  if dead, no picture
+	IFEQ
+10$:	  LDA #0
+	  JSR EN.PCF
+	ENDIF
+
+	LDA EN.LMD(X)
+			;  if unalive, skip this
+	IFNE
+	 JMP 50$
+	ENDIF
+
+	LDA EN.HEI(X)
+	ADD EN.HOF(X)
+	STA EN.HTO(X)
+
+	LDA EN.IY(X)	; EN.IY/4
+	LSRS 2
+	STA EN.TMP
+
+	LDA EN.HP(X)
+	ADD EN.TMP
+	TAY		; + EN.HP
+
+	LDA EN.IX(X)
+	LSRS 3
+	STA EN.TMP	; EN.IX/8
+
+	TYA
+	SUB EN.TMP
+	STA EN.X(X)	; EN.HP+EN.IY/4-EN.IX/8
+
+	LDA EN.VP(X)
+	SUB EN.TMP
+	TAY		; EN.VP-EN.IX/8
+
+	LDA EN.IY(X)
+	ADD #08
+	LSRS 4
+	STA EN.TMP
+	TYA
+	SUB EN.TMP
+	ADD EN.HTO(X)
+	STA EN.Y(X)	; -(EN.IY+8)/16+HEIGHT
+
+50$:
+	RTS
+
+
+;------------
+;  detect gem
+EN.CDT:
+	LDA EN.LMD(X)
+	IFNE
+	RTS		; must be alive to see gems
+	ENDIF
+
+	LDA EN.STA(X)
+	CMP #06		; only gem-eaters and trees see gems
+	IFPL
+	CMP #9
+	IFNE
+	RTS
+	ENDIF
+	ENDIF
+
+	LDA EN.TFL(X)
+	IFEQ		; if not in tunnel
+	LDA @EZ.MA2(Y)
+	AND #10
+	IFNE		; first time there
+	LDA @EZ.MA2(Y)
+	AND #^B11101111
+	STA @EZ.MA2(Y)
+
+
+	CPX #0
+	IFEQ		;  bear
+	 LDA SC.GEM
+	 CMP #99
+	 IFCC
+	  SED
+	  ADC #1
+	  CLD
+	  STA SC.GEM
+	 ENDIF
+	 LDA #0
+	 STA 1+SC.INC
+	 STA 2+SC.INC
+	 TRAM SC.GEM SC.INC
+	 JSR SC.UPD
+	 JSR MN.SN2	;  sound for gem
+	ELSE		;  others
+	 JSR MN.SN3
+
+	 LDA EN.STA(X)
+	 CMP #1
+	 IFNE
+	 CMP #2
+	 IFNE
+	 JMP 10$
+	 ENDIF
+	 ENDIF
+
+	  LDY WV.DF2
+	  TRAM DF.ETD(Y) EN.DEL(X)
+	  TRAI 0 1+EN.DEL(X)
+	  TRAI 3 EN.STA(X)
+ 10$:
+	ENDIF
+
+	JSR EN.COE		;  erase gem
+	INC SN.GFL
+
+	DEC16A CE.COC		;  dec gem count
+
+	LDA CE.COC
+	ORA 1+CE.COC
+	IFEQ
+	 STX EN.LDF
+	ENDIF
+	
+	ENDIF
+	ENDIF
+	RTS
+
+;-----------
+;  erase gem
+EN.COE:
+	LDY #0
+	LDA @EZ.MA2(Y)
+	JSR CL.PR
+
+	LDA EN.HP(X)
+	ADD #06
+	STA XB
+
+	LDA EN.VP(X)
+	SUB #03
+	ADD EN.HEI(X)
+	NEGA
+	STA YB
+	LDA FC.BV3
+	STA VB
+	INC XB
+	STA VB
+	INC XB
+	STA VB
+
+	DEC YB
+	INC XB
+	STA VB
+	DEC XB
+	STA VB
+	DEC XB
+	STA VB
+	DEC XB
+	STA VB
+	DEC XB
+	STA VB
+
+	DEC YB
+	INC XB	
+	STA VB
+	INC XB
+	STA VB
+	INC XB
+	STA VB
+
+	RTS
+
+
+
+;-------------------
+;  explanation board
+EN.BEX: .BYTE 20,20,0D8,0A0,0B0,020,40,70,90,0C0
+EN.BEY: .BYTE 0B8,090,90,70,058,038, 2,2,2,2
+EN.BEP:	.BYTE 107.,1,49.,80+16.,80
+	.BYTE 80+68.,33.,33.,33.,33.
+EN.ZFL:	.BYTE 0
+EN.BEK:	.BYTE 07,1F,1F,1F,07,0F,0F,0F,0F,0F
+
+EN.BEM:
+	LDX #0
+	BEGIN
+	  TXA
+	  LSR
+	  TAY
+	  TRAM EN.BEX(Y) EN.X(X)
+	  TRAM EN.BEY(Y) EN.Y(X)
+	  LDA EN.ANV(X)
+	  ADD EN.BEP(Y)
+	  JSR EN.PCF
+	  LDA EN.ZFL(Y)
+	  IFEQ
+	   STA EN.PC1(X)
+	   STA EN.PC2(X)
+	  ENDIF
+
+	  CPX #08
+	  IFEQ
+	   LDA FRAME
+	   AND #3F
+	   LSR
+	   CMP #10
+	   IFPL
+	    NEGA
+	    ADD #20
+	   ENDIF
+	   ADD EN.BEX(Y)
+	   STA EN.X(X)
+	  ENDIF
+
+	  LDA EN.ANV(X)
+	  IFPL
+	   LDA FRAME
+	   AND #0F
+	   IFEQ
+	    LDA EN.ANV(X)
+	    CPY #0
+	    IFEQ
+	     ADD #2
+	    ELSE
+	     ADD #4
+	    ENDIF
+	    AND EN.BEK(Y)
+	    STA EN.ANV(X)
+	   ENDIF
+	  ENDIF
+	INXS 2
+	CPX EN.NUM
+	PLEND
+	RTS
+                                                                                                                                                             

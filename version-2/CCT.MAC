@@ -1,0 +1,827 @@
+	; filename cct.mac
+
+;----------------------------
+;  routine to initialize city
+CT.INI:
+	CT.XSZ=4
+	CT.YSZ=8
+	CT.XDM=13
+	CT.YDM=13
+
+	JSR CT.TRA	; tfer playfield from ROM to RAM
+
+;  compute regions
+
+	JSR CR.INI
+10$:
+	JSR CT.RGR
+	DEC CT.CNT
+	IFPL
+	 JSR CR.ADV
+	 JMP 10$
+	ENDIF
+
+;  put in tunnel for warp
+;  also put in high score initials
+	LDA WV.XCO
+	ORA WV.YCO
+	IFEQ
+
+	TRAI 4 TEMP4
+	BEGIN
+	 JSR CT.HIN	;  put in initial
+	DEC TEMP4
+	MIEND
+
+	LDA WV.WAR
+	IFNE
+
+	 LDA ATRACT
+	 IFNE
+	  TR16AI 16+6*16+0A+CTRAM CT.A2L
+	  LDY #0
+	  LDA @CT.A2L(Y)
+	  ORA #20
+	  STA @CT.A2L(Y)
+	 ENDIF
+	 ENDIF
+	ENDIF
+	RTS
+
+;------------------------------
+;  routines for traversing city
+
+;  init for traverse of rows
+CR.INI:
+	TR16AI CTRAM+CT.YDM+4 CT.ADL
+	TRAI CT.HST CR.HST
+	TRAI CT.VST CR.VST
+	TRAI CT.XDM CT.CNT
+	RTS
+
+;  advance to the next row
+CR.ADV:
+	LDA CR.HST
+	SUB #CT.XSZ
+	STA CR.HST
+
+	LDA CR.VST
+	ADD #CT.XSZ
+	STA CR.VST
+	RTS
+
+;  init for row traverse
+BL.INI:
+	TRAM CR.HST BL.HST
+	TRAM CR.VST BL.VST
+	TRAI CT.YDM CR.CNT
+
+.INCLUDE CATOUT.MAC
+	RTS
+
+BL.IN2:
+	LDY #0
+	TRAM @CT.ADL(Y) BL.HEI
+
+	TR16AM CT.ADL,CT.A2L
+	AD16AI CT.A2L,16*16
+	RTS
+
+;  advance to next block
+BL.ADV:
+	LDA BL.HST
+	ADD #CT.YSZ
+	STA BL.HST
+	INC BL.VST
+	INC BL.VST
+	RTS
+
+;----------------------
+;  routine to draw city
+CT.DRW:
+;  traverse through rows
+	TR16AI CTRAM CT.ACL
+	TR16AI CTRAM+1 CT.ARL
+	TR16AI CTRAM+2 CT.AFL
+	TR16AI CTRAM+CT.YDM+3 CT.ALL
+
+	JSR CR.INI
+10$:
+	JSR CR.DRW
+	DEC CT.CNT
+	BMI 20$
+	JSR CR.ADV
+	JSR MN.HOU
+	JMP 10$
+
+20$:
+	RTS
+
+;--------------------------
+;  routine to draw city row
+CR.DRW:
+	JSR BL.INI
+10$:
+	JSR BL.IN2
+
+;   compute if necessary to draw face1,face2
+	TR16AM CT.ADL CT.ADB	; square before ADL X dir
+	INC16 CT.ADB
+	TRAM @CT.ADB(Y) TEMP1
+	LDA BL.HEI
+	SUB TEMP1
+	IFMI
+	 LDA BL.VST
+	 SUB BL.HEI
+	 STA BL.V1S
+	 TRAI 0 BL.V1N
+	ELSE
+	 STA BL.V1N
+	 LDA BL.VST
+	 SUB TEMP1
+	 STA BL.V1S
+	ENDIF
+
+	TR16AM CT.ADL CT.ADB	; square before ADL Y dir
+	AD16AI CT.ADB 16
+	TRAM @CT.ADB(Y) TEMP1
+	LDA BL.HEI
+	SUB TEMP1
+	IFMI
+	 LDA BL.VST
+	 SUB BL.HEI
+	 STA BL.V2S
+	 TRAI 0 BL.V2N
+	ELSE
+	 STA BL.V2N
+	 LDA BL.VST
+	 SUB TEMP1
+	 STA BL.V2S
+	ENDIF
+
+;  priority
+	LDY #0
+	LDA @CT.A2L(Y)
+	JSR CL.PR
+
+; accessibility
+	LDA @CT.A2L(Y)
+	AND #4
+	IFNE
+	 LDA FC.BV3
+	ELSE
+	 LDA FC.BVC
+	ENDIF
+	STA CT.BV3
+
+;  tunnel
+	LDA @CT.A2L(Y)
+	AND #20
+	STA CT.TUN
+
+	JSR BL.EDT
+
+	LDA BL.HEI
+	IFNE
+	 JSR BL.DRW
+	ENDIF
+
+
+	INC16 CT.ADL
+
+	DEC CR.CNT
+	BMI 20$
+	JSR BL.ADV
+	JMP 10$
+20$:		; increment ADL,ACL,ARL,AFL,ALL twice
+	
+	INC16 CT.ADL
+	INC16 CT.ADL
+	INC16 CT.ACL
+	INC16 CT.ACL
+	INC16 CT.ARL
+	INC16 CT.ARL
+	INC16 CT.AFL
+	INC16 CT.AFL
+	INC16 CT.ALL
+	INC16 CT.ALL
+
+	RTS
+
+;------------------------------------
+;  routine to determine edge switches
+BL.EDT:	LDY #0
+	JSR BL.URC
+	JSR BL.ULC
+	BIT BL.URE
+	BMI 10$
+	BIT BL.ULE
+	BMI 10$
+	JSR BL.UCC
+	JMP 20$
+10$:	TRAI 0FF BL.UCR
+20$:
+	JSR BL.HRC
+	JSR BL.HLC
+	INC16 CT.ACL
+	INC16 CT.ARL
+	INC16 CT.AFL
+	INC16 CT.ALL
+	RTS
+
+;------------------
+;  calculate BL.ULE
+;  upper left edge
+BL.ULC:	CMPIN CT.ALL,CT.ADL
+	IFNE
+	 LDA #0FF
+	ELSE		; if heights equal, dont draw edge
+	 LDA #0
+	ENDIF
+	STA BL.ULE
+	RTS
+
+;-----------------
+; calculate BL.URE
+;  upper right edge
+BL.URC:	CMPIN CT.ARL,CT.ADL
+	IFNE
+	 LDA #0FF
+	ELSE
+	 LDA #0
+	ENDIF
+	STA BL.URE
+	RTS
+
+;-----------------
+; calculate BL.UCR
+; upper corner pixel
+BL.UCC:	CMPIN CT.ACL,CT.ADL
+	IFNE
+	 LDA #0FF
+	ELSE
+	 LDA #0
+	ENDIF
+	STA BL.UCR
+	RTS
+
+;-----------------------------
+;  calculate right hidden line
+;  HES HEL start and length of hidden edge
+BL.HRC:	LDA #0FF
+	STA BL.HRE
+	CMPIN CT.ADL,CT.ARL
+	BCC 10$
+	CMPIN CT.AFL,CT.ARL
+	BCC 30$
+; cases 4 and 6,  no erase
+5$:	LDA #0
+	STA BL.HRE
+	JMP 60$	
+
+10$:	CMPIN CT.ADL,CT.AFL
+	BCS 30$
+	JMP 5$
+			; cases 1 and 2 used to be here
+25$:	STA BL.HEL
+	BMI 5$
+	DEC BL.HEL
+	BMI 5$
+	DEC BL.HEL
+	BMI 5$
+	JMP 60$
+30$:	TRAM @CT.AFL(Y) BL.HES	; cases 3 and 5
+	INC BL.HES
+	TRAM FC.BV1 FC.COH
+	CMPIN CT.ARL,CT.ADL
+	BCC 35$
+	LDA NY,CT.ADL
+35$:
+	SUB @CT.AFL(Y)
+	JMP 25$
+60$:
+
+	RTS
+;---------------------------
+; calculate left hidden line
+BL.HLC:	LDA #0FF
+	STA BL.HLE
+	CMPIN CT.ADL,CT.ALL
+	BCC 10$		; erase line to min of ALL,ADL
+	LDA NY,CT.ALL
+10$:	STA BL.HLL
+	BEQ 40$
+	DEC BL.HLL
+	BEQ 40$
+	DEC BL.HLL
+	BEQ 40$
+	JMP 50$
+
+40$:	LDA #0
+	STA BL.HLE
+50$:
+	RTS
+
+;---------------
+;   draw a block
+BL.DRW: TRAM BL.HST FC.HST
+	TRAM BL.VST FC.VST
+
+	TRAM BL.V1S FC.V1S
+	TRAM BL.V1N FC.V1N
+	JSR FACE1
+
+	TRAM BL.V2S FC.V2S
+	TRAM BL.V2N FC.V2N
+	JSR FACE2
+
+	LDA FC.VST
+	SUB BL.HEI
+	STA FC.VST
+	JSR FACE3
+
+	LDA CT.TUN
+	IFNE
+	 JSR FC.TUN
+	ENDIF
+	RTS
+
+;---------------------
+;  draw face of type 1
+FACE1:
+	TRAM FC.HST LN.HCR
+	TRAM FC.V1S LN.VCR
+	TRAM FC.BV1 LN.CO1
+	TRAM FC.V1N CURLIN
+
+10$:	JSR LN.F1
+	DEC CURLIN
+	BMI 20$
+	DEC LN.VCR
+	JMP 10$
+20$:	JSR BORDR1
+
+	RTS
+
+;-------------------
+;  border for face 1
+BORDR1:	TRAM FC.BVB LN.CO1	; upper edge
+	STA LN.CO3
+	JSR LN.F1
+
+	TRAM FC.VST LN.VCR	; lower edge
+	JSR LN.F1
+
+	TRAM FC.V1N LN.LG3
+	LDA FC.HST		; right edge
+	ADD #CT.XSZ
+	STA LN.HCR
+
+	LDA FC.V1S
+	SUB #CT.XSZ
+	STA LN.VCR
+	JSR LN.3
+
+;  hidden edge
+	BIT BL.HRE
+	IFMI
+	 LDA FC.V1N
+	 IFNE
+	  TRAM BL.HEL LN.LG3
+	  TRAM FC.COH LN.CO3
+
+	  LDA FC.VST
+	  SUB #CT.XSZ
+	  SUB BL.HES
+ 	  STA LN.VCR
+
+	  JSR LN.3	
+	 ENDIF
+	ENDIF
+	RTS
+
+;----------------
+;  face of type 2
+FACE2:
+	TRAM FC.HST LN.HCR
+	TRAM FC.V2S LN.VCR
+	TRAM FC.BV2 LN.CO2
+	TRAM FC.V2N CURLIN
+10$:	JSR LN.F2
+	DEC CURLIN
+	BMI 20$
+	DEC LN.VCR
+	JMP 10$
+20$:	JSR BORDR2
+
+	RTS
+
+;------------------
+; border for face 2
+BORDR2:	TRAM FC.BVB LN.CO2	; upper line
+	STA LN.CO3
+	JSR LN.F2
+
+	TRAM FC.V2S LN.VCR	; lower line
+	JSR LN.F2
+
+	TRAM FC.V2S LN.VCR
+	TRAM FC.V2N LN.LG3	; right vertical line
+	JSR LN.3
+
+	LDA FC.HST	; left vertical line
+	SUB #CT.YSZ
+	STA LN.HCR
+	LDA LN.VCR
+	SUB #CT.YSZ/4
+	STA LN.VCR
+	JSR LN.3
+
+;  hidden edge
+	BIT BL.HLE
+	IFMI
+	 LDA FC.V2N
+	 IFNE
+	  LDA FC.VST
+	  SUB #CT.YSZ/4
+	  STA LN.VCR
+	  DEC LN.VCR
+	  TRAM FC.BV2 LN.CO3
+	  TRAM BL.HLL LN.LG3
+	  JSR LN.3
+	 ENDIF
+	ENDIF
+	RTS
+
+;----------------
+;  face of type 3
+FACE3:	TRAI CT.XSZ LN.LG1
+	TRAI CT.YSZ CURLIN
+	TRAM FC.HST LN.HCR
+	TRAM FC.VST LN.VCR
+	TRAM CT.BV3 LN.CO1
+
+10$:	JSR LN.F1
+	DEC CURLIN
+	BMI 20$
+	DEC LN.HCR
+
+	JSR LN.F1
+	DEC CURLIN
+	BMI 20$
+	DEC LN.HCR
+
+	JSR LN.F1
+	DEC CURLIN
+	BMI 20$
+
+	DEC LN.VCR
+	DEC LN.LG1
+	JSR LN.1
+	INC LN.LG1
+	DEC LN.HCR
+
+	JSR LN.F1
+	DEC CURLIN
+	BMI 20$
+	DEC LN.HCR
+
+	JMP 10$
+20$:	JSR BORDR3
+	RTS
+
+;-----------------------
+; draw border for face 3
+BORDR3: TRAM FC.BVB LN.CO1	; upper left edge
+	STA LN.CO2
+	BIT BL.ULE
+	IFMI
+	 JSR LN.F1
+	ELSE
+			; delete extraneous line
+	 TRAM CT.BV3 LN.CO1
+	 DEC LN.LG1
+	 JSR LN.1
+	 INC LN.LG1
+	 TRAM FC.BVB LN.CO1
+	ENDIF
+	TRAM FC.HST LN.HCR	; lower right edge
+	TRAM FC.VST LN.VCR
+	JSR LN.F1
+
+				; lower left edge
+	JSR LN.F2
+
+	LDA FC.HST	; upper right edge
+	ADD #CT.XSZ
+	STA LN.HCR
+	LDA FC.VST
+	SUB #CT.XSZ
+	STA LN.VCR
+	BIT BL.URE
+	IFMI
+	 JSR LN.F2
+	ENDIF
+;  upper corner pixel
+	BIT BL.UCR
+	IFMI
+	 LDA LN.HCR
+	 SUB #CT.YSZ
+	 STA XB
+	 DEC LN.VCR
+	 DEC LN.VCR
+	 TRAM LN.VCR YB
+	 TRAM FC.BVB VB
+	ENDIF
+
+	RTS
+
+
+;------------------
+;  draw all gems
+CT.GD:
+	JSR CT.GIN
+10$:
+	JSR CT.GRD
+	DEC CT.CNT
+	IFPL
+	 JSR CR.ADV
+	 JSR MN.HOU
+	 JMP 10$
+	ENDIF
+	RTS
+
+;-----------------------
+;  init for drawing gems
+CT.GIN:
+	TR16AI 0 CE.COC
+	JSR CR.INI
+	RTS
+
+;--------------------
+;  draw a row of gems
+CT.GDR:
+	LDA FRAME
+	AND #1
+	IFEQ
+	JSR CT.GRD
+	DEC CT.CNT
+	IFPL
+	JSR CR.ADV
+	RTS
+	ENDIF
+
+	JSR GM.WO0	; done, so go to next game state
+
+	ENDIF
+	RTS
+
+;--------------
+;  draw gem row
+CT.GRD:
+	JSR BL.INI
+10$:
+	JSR BL.IN2
+
+	LDA @CT.A2L(Y)
+	AND #10
+	IFNE			;  gem present
+	 INC16 CE.COC		;  increment gem count
+	 JSR CT.SGD		;  draw it
+	ENDIF
+
+	INC16 CT.ADL
+	DEC CR.CNT
+	BMI 20$
+	JSR BL.ADV
+	JMP 10$
+20$:	
+	INC16 CT.ADL
+	INC16 CT.ADL
+
+	RTS
+
+;--------------------------
+;  draw single gem
+CT.SGD:
+	 
+	 LDA @CT.A2L(Y)		;  set priority
+	 JSR CL.PR
+
+	 LDA BL.HST
+	 SUB #02
+	 STA XB
+	 LDA BL.VST
+	 SUB BL.HEI
+	 SUB #02
+	 STA YB
+	 TRAM FC.BVC VB
+	 DEC XB
+	 STA VB
+	 DEC YB
+	 DEC XB
+	 STA VB
+	 DEC YB
+	 INC XB
+	 STA VB
+	 INC XB
+	 STA VB
+	 INC XB
+	 STA VB
+	 INC YB
+	 INC XB
+	 STA VB
+	 INC YB
+	 DEC XB
+	 STA VB
+
+	 DEC YB
+	 STA VB
+	 DEC XB
+	 STA VB
+	 DEC XB
+	 LDA FC.BVS	;  white highlight
+	 STA VB
+	RTS
+
+
+;--------------
+;  traverse row
+CT.RGR:
+	JSR BL.INI
+10$:
+	JSR BL.IN2
+
+	LDY #0
+	LDA @CT.A2L(Y)
+	AND #3
+	IFNE
+
+	CMP #1
+	IFEQ				; region 1
+	 LDA CT.HR1
+	ELSE
+	CMP #2				; region 2
+	IFEQ
+	 LDA CT.HR2
+	ELSE				; region 3
+	 LDA CT.HR3
+	ENDIF
+	ENDIF
+
+	IFMI
+	 LDA @CT.A2L(Y)
+	 AND #^B11101111
+	 STA @CT.A2L(Y)	;  no gems when height=0
+	 LDA #0
+	ELSE
+	 ADD @CT.ADL(Y)
+	ENDIF
+	STA @CT.ADL(Y)
+
+	ENDIF
+
+
+	INC16 CT.ADL
+	DEC CR.CNT
+	IFPL
+	 JSR BL.ADV
+	 JMP 10$
+	ENDIF
+	INC16 CT.ADL
+	INC16 CT.ADL
+	RTS
+
+;--------------
+;  draw tunnel
+FC.TUN:
+	TRAM BL.HST LN.HCR
+	TRAM BL.VST LN.VCR
+	TRAM #08F LN.CO1
+	TRAM #08F LN.CO2
+	TRAI 28 CURLIN
+10$:	JSR LN.F2
+	DEC CURLIN
+	BMI 20$
+	DEC LN.VCR
+	JMP 10$
+20$:	
+
+	TRAM BL.VST LN.VCR
+	TRAI 28 CURLIN
+
+30$:	JSR LN.F1
+	DEC CURLIN
+	BMI 40$
+	DEC LN.VCR
+	JMP 30$
+40$:
+
+	RTS
+
+
+;---------------------------------------------
+;  swap playfield data
+;  PL.1A length PL.AZ and PL.2A
+
+CT.SWP:
+	TR16AI PL.1A,CT.ROM
+	TR16AI PL.2A,CT.RAM
+
+	LDX #PL.AZ&0FF00/100
+	LDY #00
+10$:
+	JSR 60$
+
+	DEY
+	BNE 10$
+
+20$:
+	INC CT.ROM+1
+	INC CT.RAM+1
+	DEX
+	BMI 50$
+	BNE 10$
+	LDY #PL.AZ&0FF
+	BNE 10$
+50$:	DEC CT.ROM+1		;  transfer last byte
+	DEC CT.RAM+1
+	JSR 60$
+	RTS
+
+;---------------------------------------
+;  swap
+60$:
+	LDA @CT.ROM(Y)
+	STA TEMP1
+	TRAM @CT.RAM(Y) @CT.ROM(Y)
+	TRAM TEMP1      @CT.RAM(Y)
+	RTS
+
+
+;---------------------------------
+;  put in initial
+CT.HSS: .WORD SC.HI1+HFSIZ-1,SC.HI2+HFSIZ-1,SC.HI3+HFSIZ-1
+	.WORD SC.HI2+HFSIZ-1,SC.HI3+HFSIZ-1
+CT.HS2:	.WORD SC.HSD,SC.HSD+1,SC.HSD+2,SC.HSD+1,SC.HSD+2
+CT.RMS: .WORD CTRAM+<6*16>+2,CTRAM+<6*16>+7,CTRAM+<6*16>+0C
+	.WORD CTRAM+<0B*16>+2,CTRAM+<10*16>+2
+CT.HIN: 
+	;  get initial
+	LDA TEMP4
+	ASL
+	TAX
+
+	LDA PL.UP
+	IFEQ		;  player 1
+	 LDA CT.HSS(X)
+	 STA TEMP1
+	 LDA 1+CT.HSS(X)
+	ELSE		;  player 2
+	 LDA CT.HS2(X)
+	 STA TEMP1
+	 LDA 1+CT.HS2(X)
+	ENDIF
+	STA 1+TEMP1
+
+	TR16AM CT.RMS(X) CT.ADL
+
+	LDY #0
+	LDA @TEMP1(Y)		;  now have initial
+	SUB #4A
+
+	STA TEMP1	;  mult by 5 so (A) points to sym
+	ASLS 2
+	ADD TEMP1
+	STA TEMP1
+
+	TRAI 4 TEMP3
+	BEGIN
+
+	LDX TEMP1
+	LDA AL.55L(X)
+	STA TEMP5
+
+	LDX #4
+	BEGIN
+	ASL TEMP5
+	IFCS
+	 LDA @CT.ADL(Y)
+	 ADD #0A
+	 STA @CT.ADL(Y)
+	 JSR BL.IN2
+	 LDA @CT.A2L(Y)
+	 AND #^B11111011	;  Accessibility=0
+	 STA @CT.A2L(Y)
+	ENDIF
+	SB16AI CT.ADL 16
+	DEX
+	MIEND
+
+	AD16AI CT.ADL 16*5+1
+	INC TEMP1
+	DEC TEMP3
+	MIEND
+
+	RTS
+                                                          

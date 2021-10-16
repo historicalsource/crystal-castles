@@ -1,0 +1,1092 @@
+;  filename CWV.MAC
+
+;------------------
+;  initialize waves
+WV.INI:
+
+	LDA #0
+	STA WV.XCO
+	STA WV.XCD
+	STA WV.YCO
+	STA WV.YCD
+	STA WV.EOG
+
+	STA ST.TIM	;  init game time
+	STA 1+ST.TIM
+
+	STA WV.SCF	;  don't scroll yet
+
+	LDA #7
+	LDX EEEXTR
+	IFNE
+	 LDA #099
+	ENDIF
+	STA SC.NEL	;  next extra life at 70000
+
+	JSR WV.CMP
+	JSR MT.INI		; init motion objects
+
+	RTS
+
+
+;---------------------------
+;  swap player states
+WV.RSW:
+	JSR GR.SCL
+	LDA HW.COK
+	IFNE		;  if cocktail
+	 LDA PL.UP
+	 STA HW.FLV	;  flip	
+	ENDIF
+
+	TRAI 010 MN.DEL
+	BEGIN	
+	JSR MN.FRA	;  wait a frame
+	DEC MN.DEL
+	EQEND
+
+	LDA #11
+	JSR MS.DRW	;  draw get ready message
+	JSR MN.P12	;  player 1-2
+	JSR CT.SWP	;  swap RAM data
+	JSR WV.CMP	;  recompute things
+	RTS
+
+;-----------------------
+;  new wave, update destination, if necessary
+WV.UPD:
+	LDA WV.XCD
+	CMP WV.XCO
+	IFEQ
+
+	LDA WV.YCD
+	CMP WV.YCO
+	BEQ 1$
+	ENDIF
+	RTS
+1$:	 	; old and new equal, so update
+
+	LDA WV.YCO
+	CMP #3
+	IFNE
+	 LDA WV.YCO
+	 ADD #1
+	ELSE
+	 INC WV.XCD
+	 LDA #0
+	ENDIF
+	STA WV.YCD
+
+	RTS
+
+;---------------------------------------
+;  routine to compute new warp at end of game
+WV.WRU:
+	LDA WV.XCO
+	 CMP #8		;  no warping past level 8
+	 IFCS
+	  LDA #7
+	  BNE 10$
+	 ENDIF
+
+	 LDX WV.YCO	;  must get through first maze
+	 IFEQ
+	  SUB #1
+	 ENDIF
+
+	 CMP #0		;  no negative warp, please
+	 IFMI
+	  LDA #0
+	 ENDIF
+
+10$:
+	;  (A) is tentative warp level
+
+	LDX PL.FLG	;  if 2-player game
+	IFNE
+	LDX P2.LIV	;  other player's game over
+	IFEQ
+	 CMP WV.WAR	;  and tentative warp smaller
+	 IFCC
+	  RTS		;  then do nothing
+	ENDIF
+	ENDIF
+	ENDIF
+
+	STA WV.WAR	;  else update warp
+	RTS
+
+
+;  table of waves
+WV.TAB:
+	.BYTE   00, 02, 09,0C3
+	.BYTE   46,071, 0C,0C7
+	.BYTE  006, 0D, 45,0CB
+	.BYTE   04, 0A, 06,04F
+	.BYTE   41, 4D, 3C,0C3
+	.BYTE   0A, 02, 32,03F
+	.BYTE   01, 04, 75,0FB
+	.BYTE   01, 3A, 06,0F7
+	.BYTE   08, 7D, 05,0CB
+	.BYTE   0E
+
+;-------------------------------------------
+;  compute wave parameters, given WV.XCO,YCO
+WV.CMP:
+	JSR DF.UPD
+
+;  compute WV.OFF,  this assumes WV.SIZ=400
+	TRAI 0 WV.OFF
+	LDA WV.NUM
+	ASLS 2
+	STA WV.OFF+1
+
+	JSR CL.UPD
+
+;  update message pointer
+	LDA WV.NUM
+	STA WV.MNM
+	TRAI 0FF WV.MFL
+
+	RTS
+
+;-------------------
+;  difficulty update, also wave number
+DF.UPD:
+	LDA WV.XCO
+	ASLS 2
+	ADD WV.YCO	;  wave number index
+	TAX
+	LDA WV.TAB(X)
+	TAY
+	AND #0F
+	STA WV.NUM
+
+;  compute regions
+	LDA #0
+	STA CT.HR1
+	STA CT.HR2
+	STA CT.HR3
+	LDX #0FF
+
+	TYA
+	AND #30
+	IFEQ		;  if both reg 1 and 2 off
+	 		; turn off only one of them
+	 LDA RANDOM
+	 IFMI
+	  STX CT.HR1
+	 ELSE
+	  STX CT.HR2
+	 ENDIF
+
+	ELSE
+	 TYA
+	 AND #10
+	 IFEQ
+	  STX CT.HR1
+	 ENDIF
+	 TYA
+	 AND #20
+	 IFEQ
+	  STX CT.HR2
+	 ENDIF
+	ENDIF
+	
+	TYA
+	AND #0C0
+	IFEQ
+	 STX CT.HR3
+	ELSE
+	 CMP #0C0
+	 IFEQ
+	  LDA RANDOM
+	  AND #1F	;  0 to 31
+	 ELSE
+	  LDA #0
+	 ENDIF
+	 STA CT.HR3
+	ENDIF
+
+;  compute difficulties
+	LDA WV.XCO
+	CMP #04
+	IFCS
+ 	 LDA #03
+	ENDIF
+	ASLS 2
+	ADD WV.YCO
+	STA WV.DF1	;  short term difficulty
+
+	LDA WV.XCO
+	CMP #09		;  max out at level 10
+	IFCS
+	 LDA #09
+	ENDIF
+	STA WV.DF2	;  long term difficulty
+	TAY
+
+;  difficulty offset
+	LDA EEDIFF
+	AND #03
+	CMP #3
+	IFEQ
+	 LDA #0FF
+	ENDIF
+
+	CPY #5
+	IFCS
+	 LDA #0		;  all are equal starting at level 6
+	ENDIF
+
+	STA WV.DFO
+	RTS
+
+
+
+;  sick blue-green 0020  purple   C700
+;  light yellow    1800  gold     3800
+;  black ff20  white 0000  blue c720  green f820 red 3F00
+;-------------
+; color tables
+CL.TAB:			;  motion object colors
+	.BYTE 03F,0AB,035,072,032,025,0FB,000
+
+;  bit-map
+;  color table 1		;  greys
+	.BYTE 0FF,000,0DB,024,0FF,03F,019,000
+
+;  color table 2		;  pinkish + light blue
+	.BYTE 0FF,000,024,0DB,0FF,03F,019,000
+
+;  color table 3		;  dark blues
+	.BYTE 0FF,000,0C7,0E7,0F7,03F,019,000
+
+;  color table 4		;  light blue, grey
+	.BYTE 0FF,000,0CB,024,0FF,03F,019,000
+
+
+;  color table 5		;  reverse greys, blue gems
+	.BYTE 0FF,000,024,0DB,0FF,0C7,019,000
+
+;  color table 6		;  blue-grey  black top
+	.BYTE 0FF,0FF,0C7,024,0FF,03F,019,000
+
+;  color table 7		;  greenish grey,grey
+				;  blue gems
+	.BYTE 0FF,000,0DA,024,0F7,0C7,019,000
+
+;  color table 8		;  orange tan, dark blue
+	.BYTE 0FF,000,023,0E7,0FF,03F,019,000
+
+
+;  color table 9		;  grass green-top, white gems
+	.BYTE 0FF,0EB,0DB,024,0FF,000,019,000
+
+;  color table 10		; purplish grey, orange tan
+	.BYTE 0FF,0FF,0DC,023,0FF,0C7,019,000
+
+;  color table 11		;  reddish grey, blue
+	.BYTE 0FF,000,0DC,045,0F7,03F,019,000
+
+;  color table 12		;  orange,grey
+	.BYTE 0FF,0FF,023,024,0FF,03F,019,000
+
+;  color table 13		; greys, black top, gold gems
+	.BYTE 0FF,0FF,0DB,024,0FF,038,019,038
+
+;  color table 14		;  orange blue
+	.BYTE 0FF,000,023,045,0FF,03F,019,000
+
+;  color table 15		;  grey, dark green
+	.BYTE 0FF,000,0DB,03C,0FF,0C7,019,000
+
+;  color table 16		;  yellow, brown
+	.BYTE 0FF,000,029,0FF,0FF,03F,019,000
+
+
+CL.TBB:
+.RADIX 2
+	.BYTE 00110110
+;  1-4
+	.BYTE 10011000
+	.BYTE 10011000
+	.BYTE 10111000
+	.BYTE 10011000
+;  5-8
+	.BYTE 10101100
+	.BYTE 11011000
+	.BYTE 10011100
+	.BYTE 10011000
+;  9-12
+	.BYTE 10011000
+	.BYTE 11001100
+	.BYTE 10011000
+	.BYTE 11011000
+;  13-16
+	.BYTE 11011000
+	.BYTE 10011000
+	.BYTE 10011100
+	.BYTE 10001000
+
+;  color scramble table
+CL.SCR: .BYTE 11100100
+	.BYTE 10010011
+	.BYTE 01001110
+	.BYTE 00111001
+
+	.BYTE 11100001
+	.BYTE 10000111
+	.BYTE 00011110
+	.BYTE 01111000
+
+	.BYTE 10110100
+	.BYTE 11010010
+
+.RADIX 16
+
+;---------------------------
+;  routine to compute colors
+CL.UPD:
+	TRAI 0FF WV.CIN
+	JSR EETOTP
+
+	LDA WV.XCO
+	CMP #7
+	IFCS
+	 LDA RANDOM
+	 AND #0F
+	ELSE
+	AND #3
+	CMP #2
+	IFCC
+	CMP #0
+	IFEQ
+	 LDA TEMP1+1
+	 AND #0F
+	ELSE
+	 LDA TEMP1+1
+	 LSRS 4
+	ENDIF
+	ELSE
+	IFEQ
+	 LDA TEMP2
+	 AND #0F
+	ELSE
+	 LDA TEMP2
+	 LSRS 4
+	ENDIF
+	ENDIF
+	TAX
+	CPX #0A
+	IFCS
+	 LDX #0
+	ENDIF
+	LDA CL.SCR(X)
+
+	LDX WV.YCO
+	DEX
+	BEGIN
+	IFPL
+	LSR
+	LSR
+	ENDIF
+	DEX
+	MIEND
+	AND #3
+	STA TEMP1
+	LDA WV.XCO
+	AND #03
+	ASLS 2
+	ADD TEMP1
+
+	ENDIF
+
+	TAX
+	INX
+	STX TEMP2
+	ASLS 3
+	ADD #0F
+	STA TEMP3
+
+;  transfer color table to shadow RAM
+	LDY #3F
+
+;  red gun MSB (20's)
+;  bit-map
+	LDX TEMP2	;  Y  3F  X 1+OFF
+	JSR CL.TRB
+	LDX TEMP2
+	JSR CL.TRB
+
+;  motion objects
+	LDX #0
+	JSR CL.TRB
+;	LDX #0		0 at end of loop, see CL.TRB
+	JSR CL.TRB
+
+;  bit-map
+	LDX TEMP3
+	JSR CL.TR8	;  Y  1F  X 0F+OFF
+	LDX TEMP3
+	JSR CL.TR8	;  Y  17  X 0F+OFF
+
+;  motion-objects
+	LDX #07		;  Y  0F  X 07
+	JSR CL.TR8
+	LDX #07
+	JSR CL.TR8	;  Y  07  X 07
+	RTS
+
+;  transfer 8 bytes from CL.TAB to CL.SHR
+CL.TR8:
+	TRAI 7 TEMP1
+	BEGIN
+	 TRAM CL.TAB(X) CL.SHR(Y)
+	 DEY
+	 DEX
+	 DEC TEMP1
+	MIEND
+	RTS
+
+;  transfer 8 bits
+CL.TRB:
+	TRAM CL.TBB(X) TEMP1
+	LDX #8
+	BEGIN
+	 LDA #0
+	 LSR TEMP1
+	 IFCS
+	  LDA #20
+	 ENDIF
+	 STA CL.SHR(Y)
+	 DEY
+	 DEX
+	EQEND
+	RTS
+
+;--------------------------------------------
+;  transfer color ram
+
+CL.TRA:
+	LDA WV.CIN
+	BEQ 50$
+
+	TR16AI CL.SHR CL.PT1
+	TR16AM CL.PT1 CL.PT2
+	AD16AI CL.PT2 20
+	LDY #1F
+	BEGIN
+	 TYA
+	 ADD @CL.PT2(Y)	;  red flag
+	 TAX
+	 TRAM @CL.PT1(Y) CL.RAM(X)
+	DEY
+	MIEND
+
+50$:
+	RTS
+
+	
+;---------------------------------
+; routine to initialize mt storage
+MT.INI:
+	TRAI 0 MT.CUR
+	STA    MT.PRE	
+	TRAI 80 MT.BSL	; select buffer 1
+	RTS
+
+;----------------------------------
+;  routine to update motion objects
+MT.UPD:
+	LDA MT.CUR
+	IFEQ
+	 TR16AI MT.BU1 MT.PTR
+	ELSE
+	 TR16AI MT.BU0 MT.PTR
+	ENDIF
+
+	JSR MT.SOR	;  sort them
+
+	LDY #0
+	STY TEMP1
+	STY TEMP2
+	BEGIN
+10$:
+	 LDX TEMP1
+	 DEC EN.SPT(X)
+	 IFPL
+	  LDA EN.SPT(X)
+	  ADD TEMP2
+	  TAX
+	  LDA EN.SOR(X)
+	  TAX
+	  JSR EN.PMV
+	  JMP 10$
+	 ENDIF
+
+	INC TEMP1
+	ADAI EN.MAX TEMP2
+	LDA TEMP1
+	CMP #16
+	EQEND
+
+	LDA MT.CUR
+	EOR #1
+	STA MT.CUR
+
+	RTS
+
+;-----------------------------
+;  move pictures
+EN.PMV:
+	TRAM EN.Y(X) EN.YX
+	TRAM EN.X(X) EN.XX
+	LDA HW.FLV
+	IFNE
+	 LDA EN.YX
+	 EOR #0FF
+	 ADD #0D9
+	 STA EN.YX
+	 LDA EN.XX
+	 EOR #0FF
+	 ADD #0FD
+	 STA EN.XX
+	ENDIF
+
+	 TRAM EN.PC1(X) @MT.PTR(Y)	;  picture number
+
+	 INY
+	 LDA EN.YX
+	 ADD EN.YO1(X)
+	 STA @MT.PTR(Y)
+
+	 INY
+	 TRAM EN.PR1(X) @MT.PTR(Y)	 ;  priority
+
+	 INY
+	 LDA EN.XX
+	 ADD EN.XO1(X)
+	 STA @MT.PTR(Y)
+
+	 INY
+;-----     picture 2
+	 TRAM EN.PC2(X) @MT.PTR(Y)	;  picture number
+
+	 INY
+	 LDA EN.YX
+	 ADD EN.YO2(X)
+	 STA @MT.PTR(Y)
+
+	 INY
+	 TRAM EN.PR1(X) @MT.PTR(Y)	 ;  priority
+
+	 INY
+	 LDA EN.XX
+	 ADD EN.XO2(X)
+	 STA @MT.PTR(Y)
+
+	 INY
+
+;------    picture 3
+	 TRAM EN.PC3(X) @MT.PTR(Y)	;  picture number
+
+	 INY
+	 LDA EN.YX
+	 ADD EN.YO3(X)
+	 STA @MT.PTR(Y)
+
+	 INY
+	 TRAM EN.PR1(X) @MT.PTR(Y)	 ;  priority
+
+	 INY
+	 LDA EN.XX
+	 ADD EN.XO3(X)
+	 STA @MT.PTR(Y)
+
+	 INY
+
+;-----------------  picture 4
+	 TRAM EN.PC4(X) @MT.PTR(Y)	;  picture number
+
+	 INY
+	 LDA EN.YX
+	 ADD EN.YO4(X)
+	 STA @MT.PTR(Y)
+
+	 INY
+	 TRAM EN.PR1(X) @MT.PTR(Y)	 ;  priority
+
+	 INY
+	 LDA EN.XX
+	 ADD EN.XO4(X)
+	 STA @MT.PTR(Y)
+
+	 INY
+
+	RTS
+;------------------------------
+;  sort motion objects
+MT.SOR:
+;  init pointers
+	LDX #15
+	LDA #0
+	BEGIN
+	 STA EN.SPT(X)
+	DEX
+	MIEND
+
+;  sort
+	LDX #0
+	BEGIN
+;       	update pointer
+	 LDY EN.MX(X)	; row index
+	 LDA EN.SPT(Y)
+	 STA TEMP1	; column index
+	 ADD #1
+	 STA EN.SPT(Y)	; inc pointer
+;		update matrix
+	 TYA
+	 ASL		;  multiply by 10=EN.MAX
+	 STA TEMP3
+	 ASLS 2
+	 ADD TEMP3
+	 ADD TEMP1
+	 TAY
+	 TXA
+	 STA EN.SOR(Y)
+	INXS 2
+	CPX EN.NUM
+	PLEND
+	RTS
+
+;---------------------------------------
+; switch motion object buffers
+
+MT.TRA:
+	LDA MT.CUR
+	CMP MT.PRE
+	IFNE
+	 STA MT.PRE
+	 LDY #0
+	 LDA MT.CUR
+	 IFNE
+	  DEY
+	 ENDIF
+	 STY MT.BSL
+	ENDIF
+
+	RTS
+
+;-----------------------------
+;  table of background regions
+
+;  vertical coordinates
+SQ.VC1: .BYTE CT.VST-6    ,44  ,36  ,18  ,0B0 ,0ED
+	.BYTE 24, 26,22,3D,22,  22,24,20,6D,20
+SQ.VC2:	.BYTE CT.VST-6+50 ,88  ,43  ,3C  ,0BD ,0FF
+	.BYTE 3C, 3A,23,3E,3A,  6C,6A,21,6E,6A
+SQ.VC3:	.BYTE CT.VST-6+28 ,4B  ,44  ,18  ,0BB ,0F4
+	.BYTE 24, 26,22,3D,22,  22,24,20,6D,20
+SQ.VC4:	.BYTE CT.VST-6+78 ,8E  ,51  ,42  ,0C8 ,0FF
+	.BYTE 3C, 3A,23,3E,3A,  6C,6A,21,6E,6A
+
+;  horizontal coordinates
+SQ.HC1: .BYTE CT.HST-4    ,0A8 ,06E ,06C ,0F0 ,07F
+	.BYTE 0C, 0E,0D,10,39  ,0AC ,0AE ,0AD ,0B0 ,0F9
+SQ.HC2: .BYTE CT.HST-4-50 ,064 ,061 ,048 ,0E3 ,06D
+	.BYTE 0C, 0E,0D,10,39  ,0AC ,0AE ,0AD ,0B0 ,0F9
+SQ.HC3:	.BYTE CT.HST-4+0A0,0C2 ,0A8 ,08C ,01D ,098
+	.BYTE 38, 36,38,34,39  ,0F8 ,0F6 ,0F8 ,0F4 ,0F9
+SQ.HC4: .BYTE CT.HST-4+50 ,07E ,09B ,061 ,010 ,08D
+	.BYTE 38, 36,38,34,39  ,0F8 ,0F6 ,0F8 ,0F4 ,0F9
+
+;  increments
+SQ.IN1: .BYTE 0FF	  ,0FF ,0FF ,0FF ,0FF ,0FF
+	.BYTE 0,0,0,0,0   ,0,0,0,0,0
+SQ.IN2:	.BYTE 004	  ,004 ,004 ,004 ,004 ,000
+	.BYTE 0,0,0,0,0   ,0,0,0,0,0
+SQ.IN3:	.BYTE 004	  ,004 ,004 ,000 ,004 ,004
+	.BYTE 0,0,0,0,0   ,0,0,0,0,0
+SQ.IN4:	.BYTE 0FF	  ,0FF ,0FF ,0FF ,0FF ,0FF
+	.BYTE 0,0,0,0,0   ,0,0,0,0,0
+
+;  colors
+SQ.COL: .BYTE 6F,6F,6F,6F, 6F,6F, 2F,5F,1F,6F,1F
+	.BYTE			  2F,5F,1F,6F,1F
+
+;-----------------------------
+;  draw background, erase city
+WV.BDR:
+	LDX #0
+	STX  HW.AX
+	STX  HW.XIN
+
+	BEGIN
+	TRAM SQ.HC1(X) SQ.LS1(X)
+	TRAM SQ.HC2(X) SQ.LS2(X)
+	TRAM SQ.HC1(X) SQ.LS3(X)
+	TRAM SQ.HC3(X) SQ.LS4(X)
+	INX
+	CPX #SQ.NUM+1
+	PLEND
+
+	LDA #0
+	JSR CL.PR
+
+	TRAI 18 TEMP1
+	BEGIN		;  each hor line
+	 TRAM TEMP1 1
+	 TRAI 0 XB
+	 LDA #0F
+	 LDX #040
+
+	 BEGIN		;  erase it
+	  .REPT 4
+	   STA VB
+	  .ENDM
+	 DEX
+	 EQEND
+
+	 LDY FC.BV1	;  draw slope 1 line
+	 LDA TEMP1
+	 JSR NEGATE
+	 LDX #20
+	 BEGIN
+	  ADD #8
+	  STA XB
+;	  STY VB
+	 DEX
+	 EQEND
+
+	 LDA TEMP1	;  draw slope -1/4 line
+	 STA YB
+	 ASLS 2
+	 LDX #8
+	 BEGIN
+	  ADD #20
+	  STA XB
+	  .REPT 4
+;	  STY VB
+	  .ENDM
+	 DEX
+	 EQEND
+
+	 LDX #0
+	 BEGIN
+	  JSR SQ.SQD
+	  INX
+	  CPX #SQ.NUM+1
+	 PLEND
+
+	JSR MN.HOU		;  housekeep
+	INC TEMP1
+	EQEND
+
+	TRAI 0FF HW.AX
+
+	RTS
+
+WV.BAT:	.BYTE 11,9,19,11
+;-------------------
+;  scrolling control
+WV.SCL:
+	LDA WV.XCD
+	SUB WV.XCO
+	CMP #1
+	IFPL
+	 TRAI 3 WV.SCF		;  scroll up
+	 LDA HW.VSV
+	 CMP #01C
+	 IFEQ
+	  INC WV.XCO
+	  JSR WV.ESD
+	 ENDIF
+	 JMP 5$
+	ENDIF
+
+	LDA WV.YCD
+	SUB WV.YCO
+	CMP #1
+	IFPL
+	 TRAI 1 WV.SCF		;  scroll to right
+	 LDA HW.HSV
+	 CMP #0FC
+	 IFEQ
+	  INC WV.YCO
+	  JSR WV.ESD
+	 ENDIF
+	 JMP 5$
+	ENDIF
+
+	LDA WV.YCD
+	SUB WV.YCO
+	IFMI
+	 TRAI 2 WV.SCF		;  scroll to left
+	 LDA HW.HSV
+	 CMP #04
+	 IFEQ
+	  DEC WV.YCO
+	  JSR WV.ESD
+	 ENDIF
+;	 JMP 5$
+	ENDIF
+
+ 5$:
+;  move bear
+	LDX WV.SCF
+	LDA WV.BAT(X)
+	STA TEMP1
+	
+	LDX #0
+	LDA FRAME
+	AND #08
+	LSR
+	ADC TEMP1
+	JSR EN.PCF		;  (X) must be 0
+
+
+
+;  calculate EN.X,EN.Y
+	LDA #80
+	STA EN.X
+
+	LDA HW.HSV
+	CMP #48
+	IFCC
+	 ADD #8
+	ELSE
+	CMP #0D8
+	IFCC
+	 LSRS 2
+	 STA TEMP1
+	 LDA #62
+	 SUB TEMP1
+	ELSE
+	 JSR NEGATE
+	ENDIF
+	ENDIF
+	STA EN.Y
+
+;  other creatures
+	TRAI 12 TEMP1
+	BEGIN
+	 LDX TEMP1
+	 TXA
+	 ASLS 3
+	 ADC #20
+	 LDY WV.SCF
+	 CPY #2
+	 IFCS
+	  EOR #0FF
+	 ENDIF
+	 STA EN.X(X)
+
+	 LDA HW.HSV
+	 IFPL
+	  JSR NEGATE
+	 ENDIF
+	 SUB #10
+	 STA EN.Y(X)
+
+	 LDY #41
+	 LDA WV.SCF
+	 CMP #2
+	 IFCS
+	 LDY #39
+	 ENDIF
+	 TXA
+	 LSR
+	 SUB #2
+	 CMP WV.XCO
+	 IFCS
+	  LDY #0
+	 ENDIF
+
+	 LDA HW.HSV
+	 ADD #4
+	 CMP #9
+	 IFCC
+	  LDY #0
+	 ENDIF
+	 TYA
+	 JSR EN.PCF
+
+	DEC TEMP1
+	DEC TEMP1
+	EQEND
+
+	JSR MT.UPD
+	RTS
+
+;----------------------------
+;  move bear to X destination
+WV.MVX:
+	LDA EN.X
+	SUB EN.DSX
+
+	IFCC
+	 ADAI 4 EN.X
+	 JMP WV.FFF
+	ENDIF
+
+	CMP #4
+	IFCS
+	 SBAI 4 EN.X
+	 JMP WV.FFF
+	ENDIF
+	TRAM EN.DSX EN.X
+	RTS
+WV.FFF:
+	TRAI 0FF TEMP1
+	RTS
+
+
+;----------------------------
+;  move bear to Y destination
+WV.MVY:
+
+	LDA EN.Y
+	SUB EN.DSY
+
+	IFCC
+	 ADAI 4 EN.Y
+	 JMP WV.FFF
+	ENDIF
+
+	CMP #4
+	IFCS
+	 SBAI 4 EN.Y
+	 JMP WV.FFF
+	ENDIF
+
+	TRAM EN.DSY EN.Y
+	RTS
+
+
+;------------------------------------
+;  move bear to front
+WV.MBF:
+	TRAI 08 EN.DSY
+	TRAI 80 EN.DSX
+	LDX #0
+	STX EN.PR1		;  high priority
+	LDA #19
+	JSR EN.PCF
+	JMP WV.BMV	;  move it
+
+;--------------------------------
+;  move bear to starting position
+WV.BSP:
+;  bear facing away
+	LDX #0
+	LDA #11
+	JSR EN.PCF
+
+; determine destination
+	LDA EN.VP
+	ADD EN.HEI
+	SUB #6
+	STA EN.DSY
+	LDA EN.HP
+	ADD #1
+	STA EN.DSX
+
+WV.BMV:
+; loop to move to destination
+	BEGIN
+	 JSR MN.FRA
+	 JSR MT.UPD
+	 TRAI 0 TEMP1
+	 JSR WV.MVX
+	 JSR WV.MVY
+	 LDA TEMP1
+	EQEND
+
+	RTS
+
+
+;--------------------------
+;  draw sqare, line by line
+;  TEMP1: height 18-FF
+SQ.SQD:
+	LDA TEMP1
+	CMP SQ.VC1(X)
+	IFCC
+	 RTS
+	ENDIF
+
+	LDA SQ.VC4(X)
+	CMP TEMP1
+	IFCC
+	 RTS
+	ENDIF
+
+	LDA TEMP1
+	CMP SQ.VC2(X)
+	IFCC
+	 TRAM SQ.LS1(X) SQ.LEF
+	 ADD SQ.IN1(X)
+	 STA SQ.LS1(X)
+	ELSE
+	 TRAM SQ.LS2(X) SQ.LEF
+	 ADD SQ.IN2(X)
+	 STA SQ.LS2(X)
+	ENDIF
+
+	LDA TEMP1
+	CMP SQ.VC3(X)
+	IFCC
+	 TRAM SQ.LS3(X) SQ.RIG
+	 ADD SQ.IN3(X)
+	 STA SQ.LS3(X)
+	ELSE
+	 TRAM SQ.LS4(X) SQ.RIG
+	 ADD SQ.IN4(X)
+	 STA SQ.LS4(X)
+	ENDIF
+
+	JSR SQ.LDR
+
+	RTS
+
+;--------------------
+;  draw line of sqare
+;  SQ.LEF .. left edge, SQ.RIG .. right edge
+;  hor autoinc is on
+SQ.LDR:
+	TXA
+	PHA
+
+	LDY SQ.COL(X)
+	LDA SQ.LEF
+	STA XB
+	LDA SQ.RIG
+	SUB SQ.LEF
+	ADD #1
+	STA TEMP2
+	LSRS 3
+	IFNE
+	 TAX
+	 BEGIN
+	  .REPT 8
+	  STY VB
+	  .ENDM
+	 DEX
+	 EQEND
+	ENDIF
+	LDA TEMP2
+	AND #7
+	IFNE
+	 TAX
+	 BEGIN
+	  STY VB
+	 DEX
+	 EQEND
+	ENDIF
+
+	PLA
+	TAX
+	RTS
+
+                                                                                                                                                                                                                                                                                                                                                                              

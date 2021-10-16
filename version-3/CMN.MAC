@@ -1,0 +1,910 @@
+;	filename   CMN.MAC
+
+.IF NE,CG.MUS
+.IFT
+MN.SNI=VC.SN
+MN.SNM=VC.SN+3
+MN.SN1=VC.SN+6
+MN.SN2=VC.SN+9
+MN.SN3=VC.SN+0C
+
+.IFF
+VC.RTS=0E008
+MN.SNI=VC.RTS
+MN.SNM=VC.RTS
+MN.SN1=VC.RTS
+MN.SN2=VC.RTS
+MN.SN3=VC.RTS
+.ENDC
+
+;  get ready for game play
+MN.HIC:
+	SEI
+	LDX #0FE
+	TXS			;  reset stack
+
+	JSR MN.SNI		;  init sounds, pokey
+	JSR RS.INI		;  reset software init
+	JSR WV.INI		;  color ram etc.
+
+;  main loop
+
+	CLI			; interrupts OK
+	TRAI 0FF ST.CRF		; coin routine OK
+	
+GM.SLP:
+	LDA GM.STA
+	CMP #GM.STZ+1
+	IFCS
+	 TRAI 0 GM.STA
+	ENDIF
+	ASL
+	TAY
+	JMPIN GM.JTB
+
+GM.JTB:	.WORD GM.IN-1,GM.ST-1,GM.SW-1,GM.GP-1,GM.DT-1
+	.WORD GM.EW-1,GM.EG-1,GM.EX-1
+	.WORD GM.EY-1,GM.DH-1,GM.WO-1,GM.FL-1,GM.PC-1
+	.WORD GM.HF-1,GM.BE-1,GM.AT-1
+	GM.STZ=0F
+	
+;  ----- state 0:  goto initial state
+GM.IN:
+	JSR GM.AT0
+	JMP GM.ENL
+
+;  ----- state 1: start of game
+GM.ST0:	TRAI 1 GM.STA
+	TRAI 0FF TFLASH
+	RTS
+GM.ST:
+	LDA HW.COK
+	IFNE
+	STA HW.LE1
+	STA HW.LE2
+	ENDIF
+
+	SEI
+	JSR MN.SNI
+	CLI
+	JSR WV.INI		; init waves
+	LDA #0
+	JSR MN.SN1	;  start game music
+
+	JSR GM.SW0
+	JMP GM.ENL
+
+;  ----- state 2: start of wave
+GM.SW0:	TRAI 2 GM.STA
+	JSR MS.MWV		; draw message, if any
+
+;  on block 0,0 don't draw city, for player 1
+	LDA PL.UP
+	ORA WV.XCO
+	ORA WV.YCO
+	BEQ 10$
+
+	JSR CT.INI		; init city+elevators
+	JSR CT.DRW		; draw city
+10$:
+
+	JSR EN.INI		; init entities
+	JSR EN.INP		; and positions
+	JSR MN.INM		; zero motion objects
+	JSR WV.BSP		; move bear to starting pos
+	JSR EN.INI		; reinit entities
+	JSR CT.GIN		; init for gem drawing
+
+	RTS
+GM.SW:
+	JSR MN.FRA
+	JSR CT.GDR		; draw a row of gems
+	JMP GM.ENL
+
+	;  ----- state 3:  game play
+GM.GP0:	TRAI 3 GM.STA
+	LDA #0
+	STA CT.GMD
+	STA WV.TIM
+	STA 1+WV.TIM
+	STA WV.ATP
+	STA WV.CIN		;  color inhibit
+	RTS
+GM.GP:
+	JSR MN.FRA		;  frame handler
+
+	JSR EC.UPD		; elevator control
+	JSR EN.UPD		; EN update
+	JSR MT.UPD		; motion objects
+
+;  exit attract mode if coin has dropped
+	LDA ATRACT
+	IFEQ
+	 LDA $$CRDT
+	 IFNE
+	  JSR GM.AT0
+	 ENDIF
+	ENDIF
+
+	JMP GM.ENL
+
+	; ------- state 4:  death sequence
+GM.DT0:	TRAI 4 GM.STA
+	TRAI 60 MN.DEL		;  init delay
+	RTS
+GM.DT:
+	JSR MN.FRA	;  delay loop
+	LDA MN.DEL
+	IFNE
+	  DEC MN.DEL
+	  JMP GM.ENL
+	ENDIF
+
+	DEC WV.LIV
+	IFEQ		;  if lost last life,
+	  JSR GM.EG0	;  end of game
+	ELSE
+	  JSR GM.DH0	;  else continue
+	ENDIF
+
+	JMP GM.ENL
+
+;  state 5  end of wave
+GM.EW0:	TRAI 5 GM.STA
+	STA  MN.DEL
+	RTS
+GM.EW:
+	JSR MN.FRA
+
+	LDA WV.XCD
+	CMP #09
+	IFCS
+	LDA WV.YCD
+	CMP #1
+	IFEQ
+	 LDA WV.LIV
+	 STA WV.EOG		;  end of game on
+	 TRAI 1 WV.LIV
+	 JSR GM.DT0
+	 JMP GM.ENL
+	ENDIF
+	ENDIF
+
+	DEC MN.DEL
+	IFEQ
+	 JSR GM.EX0	;  next, scroll
+	ENDIF
+
+	JMP GM.ENL
+
+;  state 6  end of game
+GM.EG0:	TRAI 6 GM.STA
+
+	LDA ATRACT
+	IFEQ
+	 JMP 10$
+	ENDIF
+
+	TRAI 0 TEMP4
+	LDA ST.TIM
+	CMP #70
+	BCS 40$		;  280 secs = 4 2/3 minutes game time
+	LDA 1+ST.TIM
+	BNE 40$
+	JMP 50$
+40$:			;  which secret warp is it ?
+	LDA WV.XCO
+	CMP #2
+	IFEQ
+	 LDX #18
+	 BNE 45$
+	ENDIF
+	CMP #4
+	IFEQ
+	 LDX #25
+	 BNE 45$
+	ENDIF
+	CMP #6
+	IFEQ
+	 LDX #2E
+	 BNE 45$
+	ENDIF
+	BNE 50$
+45$:	STX TEMP4		;  erase whole screen
+	STX TEMP3		;  message number
+	
+50$:
+	LDA WV.EOG
+	IFNE
+	 STA TEMP4
+	ENDIF
+
+	LDA TEMP4
+	IFNE
+	 JSR GR.SCL	;  either clear whole screen
+	ELSE
+	 JSR GR.MCL	;  or only part of it
+	 JSR AL.MDB
+	ENDIF
+
+	LDA WV.EOG
+	IFEQ		;  end of crystal castles
+	 JMP 20$
+	ENDIF
+
+	LDA #1C
+	JSR MS.DRW	;  explain last castle
+
+	LDA #10
+	JSR MN.SN1
+
+	TRAI 099 SC.NEL		;  no more extra lives
+
+	LDA WV.EOG	;  1 to 6
+	CMP #1
+	IFCC
+	LDA #1
+	ENDIF
+	CMP #6
+	IFCS
+	LDA #6
+	ENDIF
+
+	ADD #2E
+	JSR MS.DRW	;  comment on player
+
+
+;  extra lives bonus
+	TRAI 80 AL.X
+	STA     AL.Y
+	LDA #0
+	STA SC.NM
+	STA 1+SC.NM
+	STA SC.INC
+	STA 1+SC.INC
+
+	LDA WV.EOG
+	STA 2+SC.INC
+	STA 2+SC.NM
+	JSR SC.NDS
+	JSR SC.UPD
+
+;  time bonus
+	TRAI 80 AL.X
+	TRAI 90 AL.Y
+
+	SED
+	LDA #0
+	STA SC.NM
+	STA SC.INC
+
+	SUB ST.TIM
+	STA 1+SC.NM
+	LDA #2
+	SBC 1+ST.TIM
+	IFCS
+	 STA 2+SC.NM
+	ELSE
+	 LDA #0
+	 STA 1+SC.NM
+	 STA 2+SC.NM
+	ENDIF
+	CLD
+
+	.REPT 4
+	ASL 1+SC.NM
+	ROL 2+SC.NM
+	.ENDM
+	TRAM 1+SC.NM 1+SC.INC
+	TRAM 2+SC.NM 2+SC.INC
+	  
+	JSR SC.NDS
+	JSR SC.UPD
+
+	LDA #4
+	STA MN.DEL
+	STA MN.DEL+1
+
+	JMP 30$
+20$:
+	;  out of lives
+
+	LDA #14
+	JSR MS.DRW	;  game over message
+	JSR MN.P12	;  player 1-2
+
+	LDA TEMP4
+	IFNE
+	 LDA TEMP3
+	 JSR MS.DRW	;  secret warp message
+	 LDA #4
+	ELSE
+	 LDA #2
+	ENDIF
+	STA 1+MN.DEL
+	STA MN.DEL
+
+	LDA #0A
+	JSR MN.SN1	;  game over music start
+
+30$:
+	JSR EEACC2	;  end of game accounting
+	JSR WV.WRU	;  update warp
+	RTS
+10$:
+	TRAI 01 MN.DEL
+	STA 1+MN.DEL
+	RTS
+GM.EG:
+	JSR MN.FRA
+
+	JSR EN.BRD
+	BNE 10$
+
+	DEC MN.DEL
+	IFEQ
+	DEC 1+MN.DEL
+	IFEQ
+10$:	 JSR GM.HF0	;  high score table
+	ENDIF
+	ENDIF
+
+	JMP GM.ENL
+
+GM.SCT:	.BYTE 0D,6,7,0D
+;  state 7  more end of wave:  scroll
+GM.EX0:
+	TRAI 7 GM.STA
+
+	LDA WV.YCO		;  scroll sound
+	CMP #3
+	IFEQ
+
+	LDA RANDOM
+	AND #3
+	TAY
+	LDA GM.SCT(Y)
+
+	ELSE
+	LDA WV.XCO
+	STA RS.KEY+1
+
+	LDA EN.WRF
+	IFNE
+	 LDA #12
+	ELSE
+	 LDA RANDOM
+	 AND #3
+	 ADC #2
+	 ADC RS.KEY+1
+	 STA RS.K2+1
+	 LDA RANDOM
+	 AND #03
+	 ADC #2
+	 ADC RS.K2+1
+	 STA RS.K3+1
+	 ADC #4
+	 STA RS.K4+1
+	 LDA #1A
+	ENDIF
+
+	ENDIF
+	JSR MN.SN1
+
+
+	JSR WV.BDR		;  redraw background
+	JSR SC.2PL		;  scores
+	JSR SC.LD2		;  and lives
+	RTS
+
+DUMDUM:
+	LDA  46	; F
+	STA  52	; R
+	STA  41	; A
+	.BYTE 0D0, 4E	;  BNE  N
+	ROR  5A	; Z
+
+	JMP GM.ENL
+
+; now scrolling can start
+GM.EX:
+	JSR MN.FRA
+	JSR WV.SCL	;  scroll
+	JMP GM.ENL
+
+;  state 8 yet more end of wave
+GM.EY0:	TRAI 8 GM.STA
+	RTS
+GM.EY:
+	JSR MN.FRA
+	JSR WV.CMP	;  compute new wave
+	JSR GM.SW0	;  start wave
+	JMP GM.ENL
+
+;  state 9 death handler
+GM.DH0:	TRAI 09 GM.STA
+	RTS
+GM.DH:
+	LDA P2.LIV
+	IFEQ		;  if other player dead
+	 JSR EN.DTH	;  player death
+	 JSR GM.WO0	;  and only restore motion objects
+	ELSE			;  if not dead
+	 JSR GM.PC0	;  player change state
+	ENDIF
+	JMP GM.ENL
+	RTS
+
+;  state 10  wave motion object init
+GM.WO0:	TRAI 0A GM.STA
+	RTS
+GM.WO:
+	JSR SC.LDS		; lives display
+	JSR EN.INP		; init entity position
+	
+	JSR GM.GP0
+	JMP GM.ENL
+
+;  state 11  flashy display
+GM.FL0:	TRAI 0B GM.STA
+	TRAI 04 1+MN.DEL
+	LDA RANDOM
+	AND #0F
+	STA WV.XCO
+	LDA RANDOM
+	AND #0F
+	STA WV.YCO
+	JSR WV.CMP
+	RTS
+GM.FL:
+	JSR MN.FRA
+
+	JSR EN.BRD
+	BNE 10$
+
+	JSR CUBEDR
+	DEC MN.DEL
+	IFEQ
+	DEC 1+MN.DEL
+	IFEQ
+10$:	 JSR GR.SCL
+	 JSR GM.AT0
+	ENDIF
+	ENDIF
+
+	JMP GM.ENL
+
+;  state 12:  player change
+GM.PC0:	TRAI 0C GM.STA
+	 LDA PL.UP	;  switch
+	 EOR #0FF
+	 STA PL.UP
+	 JSR EN.DTH	;  player death
+	 JSR WV.RSW		;  swap playfields, clear screen, message
+	 TRAI 080 MN.DEL
+	RTS
+GM.PC:
+	JSR MN.FRA
+	DEC MN.DEL
+	IFEQ
+	 JSR WV.BDR	; redraw background
+	 JSR SC.2PL	; and score
+	 LDA PL.SFL
+	 IFNE		;  has game started yet for player 2 ?
+	  JSR GR.MCL		; clear mot obj
+	  JSR MS.MWV		; draw message, if any
+	  JSR CT.DRW		; draw city
+	  JSR CT.GD		; draw gems
+	  JSR GM.WO0
+	 ELSE
+	  TRAI 0FF PL.SFL	; game has started for player 2
+	  JSR GM.ST0
+	 ENDIF
+	ENDIF
+	JMP GM.ENL
+
+;  state 13: high scores at end of game, enter initials
+GM.HF0:	TRAI 0D GM.STA
+	TRAI 03 MN.DEL
+	STA 1+MN.DEL
+	TRAI 010 TFLASH
+	RTS
+GM.HF:
+	JSR MN.FRA
+
+	LDA ATRACT
+	IFNE		; not in attract mode
+
+	JSR SC.HSU	; update high score
+	LDA SC.NWP	; if new high score
+	CMP #0FF
+	IFNE
+	 LDA TEMP1
+	 JSR HF.DRW	; display high score table
+	 JSR SC.INE	; enter initials
+	ELSE
+	 LDA P2.LIV	;  if no high score and
+	 IFEQ		;  other player dead,  wait
+	  DEC MN.DEL
+	  IFEQ
+	  DEC 1+MN.DEL
+	  ENDIF
+	  BNE 10$
+	 ENDIF
+	ENDIF
+
+	ELSE
+	 LDA #HFSIZ-1		;  display top 32 scores
+	 JSR HF.DRW
+	ENDIF
+
+	
+	LDA P2.LIV
+	IFNE
+	 JSR GM.DH0
+	ELSE
+	 LDA 2+SC.SCO
+	 CMP #70
+	 IFCS
+	  JSR GM.FL0
+	 ELSE
+	  JSR GM.BE0
+	 ENDIF
+	ENDIF
+
+10$:
+	TRAI 0FF TFLASH
+	JMP GM.ENL
+
+;---  state 14 explanation board
+GM.BE0: TRAI 0E GM.STA
+
+	LDA $$CRDT
+	ORA $CNCT
+	IFEQ
+	 JSR GR.SCL
+	 LDA #23	;  draw it if no pending coins
+	 JSR MS.DRW
+	ENDIF
+
+	LDA #0		;  init animation variable
+	TAX
+	BEGIN
+	STA EN.ANV(X)
+	INXS 2
+	CPX #14
+	PLEND
+	TRAI 06 1+MN.DEL
+
+	RTS
+GM.BE:
+	JSR MN.FRA
+
+	LDA $$CRDT
+	ORA $CNCT
+	BNE 10$
+
+	JSR EN.BRD
+	BNE 10$		;  if button pressed,  exit
+
+	JSR EN.BEM
+	JSR MT.UPD
+
+
+	DEC MN.DEL
+	IFEQ
+	DEC 1+MN.DEL
+	IFEQ
+10$:
+	 JSR GR.SCL
+	 JSR GM.AT0
+	ENDIF
+	ENDIF
+	JMP GM.ENL
+
+
+;---  state 15 attract mode
+GM.AT0: TRAI 0F GM.STA
+	TRAI 20 TFLASH
+
+	JSR EECHKT		; check up on EEROM
+;  draw wave 1 playfield
+	TRAI 0 ST.PLY		; no game play
+	STA MN.DEL
+
+	STA PL.UP		; use hs inits, not p2
+	STA HW.FLV		; filp
+	JSR WV.INI		; init colors, wave number
+	JSR WV.BDR		; draw background
+	JSR GR.MCL		; clear mot obj
+	JSR CT.INI		; init city+elevators
+	JSR CT.DRW		; draw city
+
+	JSR AL.BER
+	LDA #10
+	JSR MS.DRW		;  credits
+
+	LDA WV.WAR
+	IFNE
+	 LDA #1A
+	 JSR MS.DRW		;  warp message
+	 TRAI 0C3 AL.X
+	 TRAI 3B AL.Y
+	 TRAM SC.HS1+HFSIZ-1 SC.NM
+	 TRAM SC.HS2+HFSIZ-1 SC.NM+1
+	 TRAM SC.HS3+HFSIZ-1 SC.NM+2
+	 JSR SC.NDS		;  display high score
+	 LDA #10	        ; wait 40 seconds before
+	ELSE			; deactivating warp
+	 LDA #1
+	ENDIF
+	STA 1+MN.DEL
+
+	RTS
+GM.AT:
+	JSR MN.FRA
+	TRAI 0 ATRACT		; atract mode is on
+
+	LDA $$CRDT
+	IFNE
+	 JSR MN.SBD		;  start button decode
+	ENDIF
+
+	TRAI 048 AL.Y
+	TRAI 0B1 AL.X
+
+	LDA FRAME
+	AND #03F
+	IFEQ
+	 LDA #11.*6
+	 JSR SC.ERA
+	 LDA $CMODE
+	 AND #03
+	 IFEQ
+	  TRAI 2 $$CRDT
+	  LDA #59		;  free play
+	 ELSE
+	 LDA $$CRDT
+	 IFEQ
+	  LDA #0A		;  insert coin
+	 ELSE
+	  LDA #10		;  press start
+	 ENDIF
+	 ENDIF
+	 JSR WR.DRW
+	ELSE
+	CMP #20
+	IFEQ
+	 LDA #11.*6
+	 JSR SC.ERA
+	ENDIF
+	ENDIF
+
+	LDA FRAME
+	AND #1F			;  update once per half sec
+	IFEQ
+
+	TRAI 0C5 AL.X		;  erase for credit display
+	TRAI 058 AL.Y
+	LDA #6*6
+	JSR SC.ERA
+
+	LDA $CNCT
+	IFEQ
+	 TRAI 0D0 AL.X
+	ENDIF
+
+	LDA $$CRDT
+	IFEQ
+	 LDY $CNCT
+	 BNE 10$
+	ENDIF
+	JSR DG.2OT
+10$:
+
+	LDA AL.X
+	ADD #4
+	STA AL.X
+
+	LDA $CNCT
+	IFNE
+	 LDA #17
+	 JSR WR.DRW	;  1/2 credit display
+	ENDIF
+
+	ENDIF
+
+;  flash LED's
+	LDA HW.COK
+	IFNE
+	LDX $$CRDT
+	IFNE
+
+	LDY #0
+	LDA FRAME
+	AND #20
+	IFNE
+	 LDY #0FF
+	ENDIF
+	STY HW.LE1
+
+	CPX #02
+	IFCS
+	STY HW.LE2
+	ENDIF
+	
+	ENDIF
+	ENDIF
+
+
+	LDA $$CRDT
+	ORA $CNCT	;  no half credits
+	IFEQ
+
+	DEC MN.DEL
+	IFEQ
+	DEC 1+MN.DEL
+	IFMI
+	  TRAI 1 P1.LIV
+	  TRAI 0 PL.FLG		;  one player game
+	  STA P2.LIV
+	  STA PL.UP
+	  STA WV.WAR		;  reset warp
+	  JSR MN.SCI
+	  JSR GM.ST0
+;	  JMP GM.ENL
+	ENDIF
+	ENDIF
+
+	ENDIF
+
+	JMP GM.ENL
+
+;***********  end of loop
+GM.ENL:
+	LDA #0
+	STA TEMP1
+	STA 1+TEMP1
+	JMP GM.SLP		;  start of main loop
+
+
+;-----------------------
+;  player 1-2 message
+MN.P12:
+	LDA PL.FLG
+	IFNE
+	 LDA PL.UP
+	 EOR #0FF
+	 ADD #16
+	 JSR MS.DRW
+	ENDIF
+	RTS
+;---------------------------------------
+;  frame handler: update FRAME, watchdog
+;    call this in main loop when interrupts enabled
+MN.FRA:
+10$:	 LSR SYNC		;
+	 BCC 10$		;  frame handler
+
+	INC16 FRAME
+	INC16 WV.TIM
+
+	LDA HW.STS		;  self test switch
+	AND #MA.STS
+	IFEQ
+	 JMP MN.SLT
+	ENDIF
+
+;  housekeeping, at least every 6x16 milliseconds.
+MN.HOU:
+	STA HW.WDC		; prevent watchdog reset
+	JSR EEACC1		;  coin stats
+	RTS
+
+
+;---------------------
+;  start button decode
+MN.SBD:
+	JSR EN.BRD
+	TAY
+	AND #E.ST1
+	IFNE
+	  DEC $$CRDT
+	  TRAI 0FF ST.PLY
+	  JSR MN.STL
+	  STA P1.LIV
+	  TRAI 0 PL.FLG		;  one player game
+	  STA P2.LIV
+10$:	  STA PL.UP
+	  JSR MN.SCI
+	  SEI
+	  TRAI 0FF ATRACT	;  turn off atract flag
+	  JSR  RCN		;  and reset sounds
+	  CLI
+	  JSR GM.ST0
+	  RTS
+	ENDIF
+	TYA
+	AND #E.ST2
+	IFNE
+	 LDA $$CRDT
+	 CMP #2
+	 IFPL
+	  DEC $$CRDT
+	  DEC $$CRDT
+	  TRAI 0FF ST.PLY	;  start game play
+	  TRAI 1 PL.FLG		;  two player game
+	  JSR MN.STL
+	  STA P1.LIV
+	  STA P2.LIV
+	  TRAI 0 PL.SFL		;  no start yet for pl 2
+	  BEQ 10$		;  BRA
+	 ENDIF
+	ENDIF
+	RTS
+
+;--------------------------
+;  put starting lives in (A)
+MN.STL:
+	LDA EESTLV
+	CMP #3
+	IFCS
+	LDA #0
+	ENDIF
+	ADD #3
+	RTS
+
+;-----------------------
+;  init scores
+MN.SCI:
+	LDA #0
+	STA P1.SCO
+	STA P1.SCO+1
+	STA P1.SCO+2
+	STA P2.SCO
+	STA P2.SCO+1
+	STA P2.SCO+2
+	JSR SC.2PL		;  and output too
+	RTS
+
+;-----------------------------------
+;  kill all creatures, except player
+MN.KCR:
+	LDX #2
+	BEGIN
+	 TRAI 3 EN.LMD(X)
+	 JSR MN.OFI
+	INXS 2
+	CPX EN.NUM
+	PLEND
+
+	RTS
+
+;--------------------------------------
+;  init motion objects at start of game
+MN.INM:
+	LDX #2
+	BEGIN
+	 TRAI 0F0 EN.Y(X)
+	 JSR MN.OFI
+	INXS 2
+	CPX EN.NUM
+	PLEND
+
+	TRAI 80 EN.X
+	TRAI 08 EN.Y
+	RTS
+
+;-------------
+; init offsets
+MN.OFI:
+	TRAI 0 EN.XO1(X)
+	STA  EN.YO1(X)
+	STA  EN.XO2(X)
+	STA  EN.YO2(X)
+	STA  EN.XO3(X)
+	STA  EN.YO3(X)
+	STA  EN.XO4(X)
+	STA  EN.XO4(X)
+	RTS
+                                                                                                                                                                                                                                                                                                                                                                  

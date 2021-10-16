@@ -1,0 +1,576 @@
+;  filename CEE.mac
+;  EEROM routines
+;  programmed by ED LOGG and FRANZ LANZINGER
+;  original routines used checksums, these routines use
+;  triplication of data.
+
+
+;	Copyright Atari 1982
+;	Unauthorized reproduction, adaptation, distribution
+;	performance or display of this computer
+;	program on the associated audiovisual work
+;	is prohibited
+
+.REPT 0
+HOW TO ACCESS EEROM:
+
+to write:
+	store data
+
+to store, i.e. copy RAM to ROM
+	FF EE.SIR
+	0  EE.SLO
+	FF EE.SHI
+	FF EE.SLO
+	0  EE.SHI
+
+to recall
+	0 EE.SIR
+	X EE.REC
+	0 9E84
+	0FF 9E84
+
+to enable store on power down
+	FF EE.SIR
+	.ENDR
+
+	.PAGE
+	.SBTTL	EEACC-display accounting info
+;
+;	This routine takes the accounting info and
+;	displays it.
+;	T.HIST=TIMES FOR HISTOGRAM TABLE
+;	T.ACCV=PLAYFIELD ADDRESSES FOR ALL VALUES
+;
+;ENTRY	(EEROM,EEROM+255.)=EEROM DATA
+;USES	A,X,Y,(TEMP1,TEMP1+1),(TEMP2,TEMP2+1),(TEMP4,TEMP4+1),(TEMP5,TEMP5+1)
+EEACC:	JSR GR.SCL		;CLEAR THE SCREEN
+
+;  display the accounting messages
+	LDA #22
+	JSR MESS
+
+	TRAI 0 TEMP3+1
+	LDX #AMECH-EEROM
+	BEGIN
+	 STX TEMP3
+	 TR24AM EEROM(X) SC.NM
+	 TRAI 0B0 AL.X
+	 LDX TEMP3+1
+	 TRAM T.ACCV(X) AL.Y
+	 JSR SC.NDS
+	 ADAI 8 AL.Y
+	 LDX TEMP3
+	 INXS 3
+	INC TEMP3+1
+	LDA TEMP3+1
+	CMP #5
+	EQEND
+
+	JSR EETOTP
+
+	TR24AM TEMP1 SC.NM
+	TRAI 0B0 AL.X
+	TRAI 58  AL.Y
+	JSR SC.NDS
+
+	LDX I,0
+	LDY I,3
+	CLC
+	SED
+15$:	LDA X,EEROM+GAME2	;2 * number of 2 play games
+	ADC X,EEROM+GAME2
+	STA X,TEMP1
+	INX
+	DEY
+	BNE 15$
+	LDX I,0
+	LDY I,3
+	CLC
+20$:	LDA X,TEMP1
+	ADC X,EEROM+GAME1	;add 1 player games
+	STA X,TEMP1		;get total number of games
+	INX
+	DEY
+	BNE 20$
+	CLD
+
+	TR24AM TEMP1 SC.NM
+	TRAI 0B0 AL.X
+	TRAI 070 AL.Y
+	JSR SC.NDS	 ; display total number of games
+
+;  calculate average game time
+;
+	LDX I,3
+28$:	LDA X,EEROM+GTIME
+	STA X,TEMP4
+	DEX
+	BPL 28$		; copy total game time to zero page
+
+	LDA SC.NM
+	ORA SC.NM+1
+	ORA SC.NM+2		;for no games
+	BEQ 45$			;average game time=0
+
+;  subtractive divide
+	LDY I,0FF
+	SED
+30$:	INY
+	CPY I,0EF
+	BEQ 40$			;OVERFLOW-LEAVE AT MAX
+	LDA TEMP4		;SUBTRACT NUMBER OF GAMES
+	SEC		;UNTIL TOTAL GAME TIME IS NEGATIVE
+	SBC SC.NM  ;NOTE THAT  RESULT IS MODUL0 16 MINUTES
+	STA TEMP4		;64 SECONDS = 1 MINUTE
+	LDA TEMP4+1
+	SBC SC.NM+1
+	STA TEMP4+1
+	LDA TEMP5
+	SBC SC.NM+2
+	STA TEMP5
+	LDA TEMP5+1
+	SBC I,0
+	STA TEMP5+1
+	BPL 30$			;IF NOT DONE
+40$:
+;  (Y) contains result of division
+	CLD
+	TYA
+;  convert from HEX to time format
+	AND I,0F
+	CMP I,0F
+	TYA
+	BCC 42$	;IF 60 SECONDS THEN ADD 1 TO MINUTES
+	INY
+42$:	LSRS 4  ;ADD 64 SEC NIBBLE TO 4 SECOND NIBBLE BECAUSE
+		;64 SECONDS=1 MINUTES + 4 SECONDS
+	STY TEMP2
+	CLC
+	ADC TEMP2	;ADJUSTED MINUTES + SECONDS/4
+	STA TEMP2
+	AND I,0F
+	CMP I,0F
+	BCC 45$	 ;IF 60 SECONDS THEN ADD 1 TO MINUTES
+	INC TEMP2
+
+45$:
+;  ( TEMP2) contains result
+
+	TRAI 078 AL.Y
+	TRAI 0B0 AL.X
+	LDX TEMP2
+	JSR TIME		;display average time
+
+;  display histogram,  modified for 6 digits
+
+	TRAI 194. AL.Y
+	LDA I,EECK2-HISTOG-3
+	STA TEMP2		;  histogram data
+	LDA I,EECK2-HISTOG/3-1
+	STA TEMP3		;  time data
+50$:	LDY TEMP3
+	SBAI 6 AL.Y
+	TRAI 60 AL.X
+	LDX T.HIST(Y)		;get time interval
+	JSR TIME		;display time
+	TRAI 090 AL.X		;move over
+	LDX TEMP2
+	LDA X,HISTOG
+	STA SC.NM
+	LDA X,HISTOG+1
+	STA SC.NM+1
+	LDA X,HISTOG+2
+	STA SC.NM+2
+	JSR SC.NDS		;display number
+	SBAI 3 TEMP2
+	DEC TEMP3
+	BPL 50$
+
+	TRAI 0F0 AL.Y		;  display failure index
+	TRAI 80  AL.X
+	TRAM EEROM+0FF SC.NM
+	TRAI 0 SC.NM+1
+	STA    SC.NM+2
+	JSR SC.NDS
+
+	RTS
+
+;------------------------------
+;  get total paid coins
+EETOTP:
+	SED
+	LDA LMECH
+	CLC
+	ADC RMECH		;GET TOTAL PAID COINS
+	STA TEMP1
+	LDA LMECH+1
+	ADC RMECH+1
+	STA TEMP1+1
+	LDA LMECH+2
+	ADC RMECH+2
+	STA TEMP2
+	CLD
+	RTS
+
+	.PAGE
+
+	.SBTTL	EEACC1 - UPDATE ACCOUNTING FOR COIN COUNTERS
+;
+;	CALL THIS ROUTINE ONCE A FRAME TO UPDATE THE COIN COUNTER
+;	ACCOUNTING INFO IN THE EEROM.  BE CAREFULL TO INITIALIZE 
+;	"EECOIN" TO THE COIN COUNTER OFF STATE.
+;
+;ENTRY	(EECOINS)=LAST STATE OF COIN COUNTERS
+;	($CCTIM,$CCTIM+2)=AUX, LEFT AND RIGHT COIN COUNTER STATE
+;EXIT	(EECOINS)=STATE OF COIN COUNTERS
+;USES	A,X,Y,TEMP1,(TEMP2,TEMP2+1)
+EEACC1:	LDY I,RMECH-EEROM
+	LDX EECOIN
+	LDA $CCTIM
+	ASL
+	ROL EECOIN
+	LDA $CCTIM+1
+	ASL
+	ROL EECOIN
+	LDA $CCTIM+2
+	ASL
+	ROL EECOIN	;new state of the coin counters
+	TXA
+	EOR EECOIN	;1=for a change in state
+	AND EECOIN	;1=coin counters just turned on
+10$:	LSR
+	BCC 20$			;NO CHANGE
+	STA TEMP2
+
+	STY TEMP2+1
+	JSR EEINC
+
+	LDY TEMP2+1
+	LDA TEMP2
+20$:	DEY
+	DEY
+	DEY
+	CPY I,AMECH-EEROM
+	BCS 10$			;CONTINUE THRU ALL COUNTERS
+	RTS
+
+	.PAGE
+
+	.SBTTL	EEACC2-accumulate game time statistics	
+;
+;	CALL THIS ROUTINE AT END OF GAME.  REMEMBER TO
+;	CLEAR THE GAME TIME WHEN A GAME IS STARTED.
+;
+;ENTRY	(ST.TIM,1+ST.TIM)=GAME TIME FOR current player
+;	(PL.FLG)=NUMBER OF PLAYERS 0,1
+;USES	A,X,Y
+EEACC2:
+	JSR EECHKT	;  check triplication
+
+	TRAI 0 EE.SIR
+	SED
+	LDY #GTIME
+	LDA EEROM(Y)
+	CLC
+	ADC ST.TIM
+	STA EEROM(Y)
+	LDA 1+EEROM(Y)
+	ADC 1+ST.TIM
+	STA 1+EEROM(Y)
+	LDA 2+EEROM(Y)
+	ADC I,0
+	STA 2+EEROM(Y)
+	LDA 3+EEROM(Y)
+	ADC I,0
+	IFCC 			;DO NOT OVERFLOW COUNTER
+	STA 3+EEROM(Y)
+	ENDIF
+	CLD
+
+	LDX #3
+	JSR EEUPD
+
+	LDA #GAME1
+	LDX PL.FLG		;0 OR 1
+	BEQ 10$			;1 PLAYER GAME
+	ADD #3
+
+	LDX PL.UP
+	IFEQ			; for two player game
+				; update number of plays
+				; only once
+10$:
+	TAY
+	JSR EEINC
+	ENDIF
+
+;  histogram update
+11$:	LDX I,EECK2-HISTOG/3-1
+	LDA ST.TIM+1
+	BNE 14$			;if exceeded 6:40
+	LDA ST.TIM		; 10 means 10.x4secs=40secs
+	LDX I,0
+
+12$:
+	SED
+	SEC
+	SBC #10		;NUMBER OF seconds per interval
+	CLD
+	BCC 14$			;end of loop
+	INX
+	CPX I,EECK2-HISTOG/3-1
+	BCC 12$			;if not at max yet
+14$:
+	TXA			; multiply by 3
+	STA TEMP1
+	ASL
+	ADD TEMP1
+	ADC #HISTOG-EEROM
+	TAY
+
+;	JMP EEINC
+
+;---------------------------------------
+;  increment EEROM(Y) to 2+EEROM(Y)
+EEINC:
+	TRAI 0 EE.SIR
+	SED
+	LDA EEROM(Y)
+	CLC
+	ADC I,1
+	STA EEROM(Y)
+	LDA 1+EEROM(Y)
+	ADC I,0
+	STA 1+EEROM(Y)
+	LDA 2+EEROM(Y)
+	ADC I,0
+	STA 2+EEROM(Y)	;IF THIS OVERFLOWS EEROM IS DEAD
+	CLD
+
+	LDX #2
+;	JMP EEUPD
+
+;-----------------------------------------------------
+;  update in triplicate starting at EEROM(Y) (X)+1 times
+EEUPD:
+	BEGIN
+	 LDA EEROM(Y)
+	 JSR EESTO
+	 INY
+	 DEX
+	MIEND
+	TRAI 0FF EE.SIR
+	RTS
+
+.PAGE
+;------------------------------------------------------
+	.SBTTL	EEINIT-read and initialize EEROM data
+
+EEINIT:
+EECHKT:
+	LDA #0		;  check the data
+	STA TEMP3
+	LDY #EETRIP-1
+	BEGIN
+	 JSR EECHK
+	 DEY
+	MIEND
+
+	LDY #EETRIP-1
+	LDA EEROM(Y)
+	CMP #0F
+	BNE 10$
+	
+	LDA TEMP3
+	CMP #4
+	IFCS  ; if more than 4 failures,  reset EEROM data
+10$:
+	 TRAI 0 EE.SIR
+	 LDY #EETRIP-1
+	 LDA #0F	;  so you don't get garbage if EEROM's are swapped
+	 JSR EESTO	;
+	 LDY #EETRIP-2
+	 BEGIN
+	  JSR EERES
+	 DEY
+	 MIEND
+	 INY		;  now 0
+	 STY EEROM+0FF
+	 DEY		;  now 0FF
+	 STY EE.SIR
+	ENDIF
+
+	RTS
+
+;-----------------------
+;  clear accounting info
+EECLAC:
+	 TRAI 0 EE.SIR		;  don't store
+	 LDY #EECK2-EEROM-1	;  end of accounting info
+	 BEGIN
+	  JSR EERES
+	 DEY
+	 CPY #GAME1-1
+	 EQEND
+	 TRAI 0FF EE.SIR
+	 RTS
+
+;-----------------------------------
+;  check up on triplication
+EECHK:
+	LDX #0		;  0 for EE.SIR
+
+	LDA EERM1(Y)
+	EOR #0FF
+	STA TEMP1
+	LDA EERM2(Y)
+	EOR #0AA
+	STA TEMP2
+
+	LDA EEROM(Y)
+	CMP TEMP1
+	IFNE
+	 STX EE.SIR
+	 CMP TEMP2
+	 IFEQ
+	  EOR #0FF
+	  STA EERM1(Y)
+	  JMP 40$
+	 ELSE
+	  LDA TEMP1
+	  CMP TEMP2
+	  IFEQ
+	   STA EEROM(Y)
+	   BEQ 40$
+	  ELSE
+	   BNE 30$
+	  ENDIF
+	 ENDIF
+	ELSE
+	 CMP TEMP2
+	 IFNE
+	  STX EE.SIR
+	  EOR #0AA
+	  STA EERM2(Y)
+	  JMP 40$
+	 ELSE
+	  RTS
+	 ENDIF
+	ENDIF
+
+30$:
+	JSR EERES
+40$:	LDA TEMP3
+	ADD #1
+	IFCC
+	 STA TEMP3
+	ENDIF
+	INC EEROM+0FF		;  increment failure counter
+	TRAI 0FF EE.SIR
+	RTS
+
+;----------------------
+;  reset EEROM location
+EERES:
+	LDA #0
+
+;  store value in EEROM location
+EESTO:
+	STA EEROM(Y)
+	EOR #0FF
+	STA EERM1(Y)
+	EOR #055
+	STA EERM2(Y)
+	RTS
+
+.PAGE
+;----------------------------------
+;  compute coin mode, given options
+EE.CMD:
+	LDA EEOPT
+	ADD #2
+	AND #3
+	STA $CMODE
+	LDA EEOPT+1
+	AND #1
+	ASLS 4
+	ADC $CMODE
+	STA $CMODE
+	LDA EEOPT+2
+	AND #3
+	ASLS 2
+	ADC $CMODE
+	STA $CMODE
+	RTS
+
+.SBTTL  EETST1
+;
+;	THIS ROUTINE USES THE "EESTOR" TWICE SO DO NOT OVER
+; USE THIS ROUTINE BECAUSE THE XICOR IS VALID FOR 1000
+;	STORES.  THIS DATA WILL NOT DESTROY THE DATA UNLESS
+; THE EEROM FAILS.  THE SYMBOL "NWAIT" MUST BE DEFINED
+;	SO THAT THIS ROUTINE CAN WAIT THE REQUIRED 10 MILLI
+;	SECONDS FOR A STORE.
+;
+;EXIT	(EEBUF)=A SEPARATE 256 BYTE BUFFER
+;	(CC)=zero if test passed
+;	(X)=index where ROM failed
+;	(A)=difference (EOR) in error and expected result
+;USES	A,X,Y,(EEBUF,EEBUF+255.)
+EETST1:
+	LDX I,0
+10$:	LDA X,EEROM
+	STA X,EEBUF		; save data
+	TXA
+	STA X,EEROM		; generate test data
+	INX
+	BNE 10$
+
+	JSR EESTOR		; store test data
+95$:	STA X,EEROM		;clear RAM in EEROM
+	DEX
+	BNE 95$
+
+	STX EE.SIR
+	STX EE.REC		; recall test data
+	STX EE.RE2
+	TRAI 0FF EE.RE2	
+
+30$:	LDA X,EEROM		; is it the same?
+	STX TEMP1
+	EOR TEMP1
+	BNE 50$
+	INX
+	BNE 30$
+		;  test passed, so restore from EEBUF
+40$:	LDA X,EEBUF
+	STA X,EEROM
+	INX
+	BNE 40$
+
+	JSR EECHKT		;  verify validity
+	JSR EESTOR		;  and store it, so that no garbage in ROM
+50$:
+	RTS
+
+EESTOR:
+	LDY #0FF
+	LDA #000
+	STY EE.SIR
+	STA EE.SLO
+	STY EE.SHI
+	STY EE.SLO
+	STA EE.SHI
+
+EEWAIT:
+;	LDY I,NWAIT
+	LDY #10
+20$:	INX
+	BNE 20$			;WAIT 850 US AT 1.5 MHZ
+	DEY
+	BNE 20$			;WAIT AT LEAST 10 MS (NWAIT=10 FOR 12.75 MS)
+
+;  on exit of EESTOR (A),(X),(Y) are 0
+	RTS
+                                        
